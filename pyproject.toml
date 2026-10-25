@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "torch-fea-mesh"
+version = "0.1.0"
+description = "PyTorch mesh containers, geometry, and processing for finite element analysis"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["numpy", "torch", "torch-scatter"]
+
+[project.optional-dependencies]
+vtk = ["vtk"]
+chamfer = ["torch-geometric>=2.8", "pyg-lib>=0.6"]
+dev = ["pytest>=7", "build", "twine"]
+
+[project.urls]
+Repository = "https://github.com/liangbright/pytorch_fea_mesh"
+Issues = "https://github.com/liangbright/pytorch_fea_mesh/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["torch_fea_mesh", "torch_fea_mesh.*"]
+namespaces = false
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.pytest.ini_options]
+testpaths = ["test"]
+addopts = "-ra --strict-markers --import-mode=importlib"
+markers = [
+    "geometry: mesh geometry, topology, state, and gradients",
+    "processing: connectivity, smoothing, repair, and surface processing",
+    "transform: rigid, similarity, and rotation transformations",
+    "generation: synthetic mesh generators",
+    "io: mesh serialization, INP, and VTK",
+    "vtk: requires the optional VTK dependency",
+    "chamfer: requires PyTorch Geometric and its KNN backend",
+    "remeshing: isotropic triangle surface remeshing",
+    "gpu: requires a CUDA device",
+    "slow: longer running tests",
+    "local_data: optional checks using the ignored local data directory",
+    "packaging: import and package-discovery checks",
+]

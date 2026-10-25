@@ -1,0 +1,8 @@
+include README.md CONTRIBUTING.md CHANGELOG.md
+recursive-include doc *.md *.json
+recursive-include example *.py *.md
+recursive-include test *.py
+prune data
+prune output
+prune test_output
+global-exclude __pycache__ *.py[cod]
