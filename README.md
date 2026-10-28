@@ -99,9 +99,11 @@ python -m pytest test/remeshing/ -v
 Optional-feature and CUDA tests report skips when their dependencies or hardware
 are unavailable. The [testing guide](doc/testing.md) explains test selection,
 coverage, shared input files, and retained test outputs. Only the path-and-purpose
-inventory [data_record.json](data/data_record.json) is tracked; obtain datasets
-separately and place test inputs in `data/test/data/` and example inputs in
-`data/example/data/`. Each test run saves files in `data/test/<run-id>/output/`.
+inventory [data_record.json](data/data_record.json) is tracked. Download the shared
+[test and example data from Box](https://miami.box.com/s/h7yiio2aja8qxk5a0bep4zy7vyfwzvs3)
+and place the files at the paths listed in that record, relative to `data/`.
+Test inputs belong in `data/test/data/` and example inputs in `data/example/data/`.
+Each test run saves files in `data/test/<run-id>/output/`.
 
 ## Contributing
 
