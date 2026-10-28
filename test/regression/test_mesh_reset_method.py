@@ -6,7 +6,7 @@ pytest.importorskip("vtk", reason="VTK is required for this test module")
 """Behavioral tests for full reset, cache reset, and geometry replacement."""
 from copy import deepcopy
 from pathlib import Path
-import tempfile
+from test.helper.output import output_directory
 import unittest
 
 import numpy as np
@@ -234,8 +234,8 @@ class MeshResetTest(unittest.TestCase):
                         self.assert_value_equal(vars(mesh), vars(expected))
 
     def test_torch_load_resets_missing_field(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = str(Path(directory) / 'minimal.pt')
+        with output_directory('mesh_reset') as directory:
+            path = str(Path(directory) / 'mesh_reset_minimal.pt')
             for dtype in DTYPES:
                 for cls in CLASSES:
                     with self.subTest(dtype=dtype, cls=cls.__name__):
@@ -250,8 +250,8 @@ class MeshResetTest(unittest.TestCase):
                         self.assert_value_equal(vars(mesh), vars(expected))
 
     def test_torch_load_restores_saved_adjacency_and_metadata(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = str(Path(directory) / 'saved.pt')
+        with output_directory('mesh_reset') as directory:
+            path = str(Path(directory) / 'mesh_reset_saved.pt')
             for cls in (TriangleMesh, QuadTriangleMesh):
                 with self.subTest(cls=cls.__name__):
                     source = fixture(cls, torch.float64)
@@ -270,7 +270,7 @@ class MeshResetTest(unittest.TestCase):
                     self.assertIsNone(mesh.element_area)
 
     def test_file_loader_replaces_old_state(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with output_directory('mesh_reset') as directory:
             for dtype in DTYPES:
                 source = fixture(TriangleMesh, dtype)
                 for extension, save, load in (
@@ -279,7 +279,7 @@ class MeshResetTest(unittest.TestCase):
                     ('stl', None, 'load_from_stl'),
                 ):
                     with self.subTest(dtype=dtype, extension=extension):
-                        path = str(Path(directory) / ('mesh.' + extension))
+                        path = str(Path(directory) / ('mesh_reset_mesh.' + extension))
                         if save is None:
                             writer = vtk.vtkSTLWriter()
                             writer.SetFileName(path)
@@ -296,8 +296,8 @@ class MeshResetTest(unittest.TestCase):
                         self.assert_value_equal(vars(mesh), vars(expected))
 
     def test_mdk_load_replaces_node_set_and_restores_name(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = str(Path(directory) / 'mesh.json')
+        with output_directory('mesh_reset') as directory:
+            path = str(Path(directory) / 'mesh_reset_mesh.json')
             source = fixture(PolygonMesh, torch.float64)
             source.name = 'new mesh'
             source.node_set = {'new_nodes': [1, 2]}
@@ -313,8 +313,8 @@ class MeshResetTest(unittest.TestCase):
             self.assertEqual(mesh.mesh_data, {})
 
     def test_failed_reader_preserves_existing_mesh(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = str(Path(directory) / 'invalid.pt')
+        with output_directory('mesh_reset') as directory:
+            path = str(Path(directory) / 'mesh_reset_invalid.pt')
             torch.save({'node': [[0., 0., 0.]]}, path)
             for reader in ('read_mesh_vtk', 'read_mesh_vtk_slow', 'load_from_torch'):
                 with self.subTest(reader=reader):

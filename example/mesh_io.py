@@ -7,11 +7,11 @@ from torch_fea_mesh.mesh.quad_mesh import QuadMesh
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=Path('data/example'))
+    parser.add_argument('--output', type=Path, default=Path(__file__).resolve().parents[1] / 'data/example/mesh_io_output')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     source = create_quad_grid_mesh(4,4)
-    path = args.output/'quad.pt'
+    path = args.output/'mesh_io_quad.pt'
     source.save_as_torch(path)
     restored = QuadMesh()
     restored.load_from_torch(path)

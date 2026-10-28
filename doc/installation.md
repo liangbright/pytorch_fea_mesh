@@ -60,7 +60,9 @@ python -m twine check dist/*
 ```
 
 The wheel contains the library. The source distribution also contains tests,
-examples, and documentation. Local `data/` files are excluded from both.
+examples, documentation, and `data/data_record.json`. Dataset files and generated
+outputs under `data/` are excluded from both. Obtain shared inputs separately to
+run the tests that use them; see the [testing guide](testing.md).
 
 To check an installed wheel, use a separate environment with matching numerical
 dependencies and run from outside the project directory. This ensures the source

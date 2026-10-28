@@ -104,5 +104,7 @@ python example/remesh_template_barycentric.py --landmark --output /tmp/barycentr
 python -m pytest test/remeshing/test_template_barycentric*.py
 ```
 
-The regression tests bundle their input fixtures and do not need the original
-development checkout or generated result files.
+The regression tests load separately shared inputs from
+`data/test/data/template_barycentric_fixture/`. The tracked
+`data/data_record.json` lists their relative paths and purposes. Missing inputs
+produce explicit skips; see the [testing guide](testing.md) for the layout.

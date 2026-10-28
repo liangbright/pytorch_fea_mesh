@@ -8,7 +8,7 @@ from torch_fea_mesh.processing.isotropic_triangle_surface_remesher import isotro
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=Path('data/example'))
+    parser.add_argument('--output', type=Path, default=Path(__file__).resolve().parents[1] / 'data/example/isotropic_remesher_output')
     parser.add_argument('--iterations', type=int, default=2)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
@@ -21,8 +21,8 @@ def main():
             faces.extend([[a,a+1,a+n+1],[a,a+n+1,a+n]])
     source = TriangleMesh(torch.tensor(nodes,dtype=torch.float64),faces)
     output = isotropic_triangle_surface_remesh(source,.7,False,max_iter=args.iterations)
-    source.save_as_vtk(str(args.output/'source.vtk'))
-    output.save_as_vtk(str(args.output/'remeshed.vtk'))
+    source.save_as_vtk(str(args.output/'isotropic_remesher_source.vtk'))
+    output.save_as_vtk(str(args.output/'isotropic_remesher_remeshed.vtk'))
     print(output.mesh_data['remeshing_report'])
 
 

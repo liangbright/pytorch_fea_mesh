@@ -11,14 +11,14 @@ from torch_fea_mesh.io.save_mesh_as_inp_file import save_polygon_mesh_to_inp, sa
 pytestmark = pytest.mark.io
 
 
-def test_torch_dictionary_round_trip(triangle, tmp_path):
+def test_torch_dictionary_round_trip(triangle, test_output_dir):
     triangle.node_set['fixed'] = [0, 1]
     triangle.element_set['surface'] = [0]
     triangle.node_data['temperature'] = torch.arange(3, dtype=torch.float64).reshape(-1,1)
     triangle.element_data['stress'] = torch.ones((1,6), dtype=torch.float64)
     triangle.mesh_data['load'] = {'pressure': 2.0}
     triangle.build_edge()
-    path = tmp_path / 'mesh.pt'
+    path = test_output_dir / 'mesh_io_dictionary.pt'
     triangle.save_as_torch(path)
     restored = TriangleMesh()
     restored.load_from_torch(path)
@@ -32,8 +32,8 @@ def test_torch_dictionary_round_trip(triangle, tmp_path):
     torch.testing.assert_close(restored.element_data['stress'], triangle.element_data['stress'])
 
 
-def test_minimal_legacy_torch_dictionary(triangle, tmp_path):
-    path = tmp_path / 'legacy.pt'
+def test_minimal_legacy_torch_dictionary(triangle, test_output_dir):
+    path = test_output_dir / 'mesh_io_legacy.pt'
     torch.save({'node': triangle.node, 'element': triangle.element,
                 'node_set': {'fixed': [0]}, 'mesh_data': {'tag': 'legacy'}}, path)
     restored = TriangleMesh()
@@ -44,10 +44,10 @@ def test_minimal_legacy_torch_dictionary(triangle, tmp_path):
 
 
 @pytest.mark.parametrize('kind', ['triangle', 'tetrahedron'])
-def test_inp_writer_reader(kind, triangle, tetrahedron, tmp_path):
+def test_inp_writer_reader(kind, triangle, tetrahedron, test_output_dir):
     mesh, writer = ((triangle, save_polygon_mesh_to_inp) if kind == 'triangle'
                     else (tetrahedron, save_polyhedron_mesh_to_inp))
-    path = tmp_path / (kind+'.inp')
+    path = test_output_dir / ('mesh_io_'+kind+'.inp')
     writer(mesh, path)
     restored = read_abaqus_inp(path, remove_unused_node=True)
     np.testing.assert_allclose(restored['node'], mesh.node.numpy())
@@ -55,10 +55,10 @@ def test_inp_writer_reader(kind, triangle, tetrahedron, tmp_path):
     assert len(restored['element_type']) == 1
 
 
-def test_vtk_fallback_writer_without_vtk_flag(triangle, tmp_path, monkeypatch):
+def test_vtk_fallback_writer_without_vtk_flag(triangle, test_output_dir, monkeypatch):
     module = importlib.import_module('torch_fea_mesh.mesh.mesh')
     monkeypatch.setattr(module, '_Flag_VTK_IMPORT_', False)
-    path = tmp_path/'triangle.vtk'
+    path = test_output_dir/'mesh_io_fallback_triangle.vtk'
     triangle.save_as_vtk(str(path))
     text = path.read_text()
     assert 'DATASET POLYDATA' in text
@@ -69,10 +69,10 @@ def test_vtk_fallback_writer_without_vtk_flag(triangle, tmp_path, monkeypatch):
 
 @pytest.mark.vtk
 @pytest.mark.parametrize('kind', ['triangle', 'tetrahedron'])
-def test_vtk_round_trip(kind, triangle, tetrahedron, tmp_path):
+def test_vtk_round_trip(kind, triangle, tetrahedron, test_output_dir):
     pytest.importorskip('vtk')
     mesh = triangle if kind == 'triangle' else tetrahedron
-    path = tmp_path/(kind+'.vtk')
+    path = test_output_dir/('mesh_io_'+kind+'.vtk')
     mesh.node_data['value'] = torch.arange(len(mesh.node),dtype=torch.float64).reshape(-1,1)
     mesh.save_as_vtk(str(path))
     restored = type(mesh)()

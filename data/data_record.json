@@ -1,0 +1,238 @@
+[
+  {
+    "path": "test/data/isotropic_remesher_fixture/isotropic_remesher_triangle_surface.vtk",
+    "purpose": "Input surface for test/test_local_data.py::test_local_triangle_surface."
+  },
+  {
+    "path": "test/data/local_mesh_archive/local_mesh_p0_0.vtk",
+    "purpose": "Additional local mesh retained from the previous data directory; no current automated consumer."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_manifest.json",
+    "purpose": "Case definitions and input paths for template barycentric remesher regression tests."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_0/template_barycentric_test_0_boundary_correspondence.json",
+    "purpose": "Template barycentric regression case test_0: boundary_correspondence.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_0/template_barycentric_test_0_case.json",
+    "purpose": "Template barycentric regression case test_0: case.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_0/template_barycentric_test_0_preflight.json",
+    "purpose": "Template barycentric regression case test_0: preflight.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_0/template_barycentric_test_0_source.json",
+    "purpose": "Template barycentric regression case test_0: source.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_0/template_barycentric_test_0_source.vtk",
+    "purpose": "Template barycentric regression case test_0: source.vtk."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_0/template_barycentric_test_0_template.json",
+    "purpose": "Template barycentric regression case test_0: template.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_0/template_barycentric_test_0_template.vtk",
+    "purpose": "Template barycentric regression case test_0: template.vtk."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_1/template_barycentric_test_1_boundary_correspondence.json",
+    "purpose": "Template barycentric regression case test_1: boundary_correspondence.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_1/template_barycentric_test_1_case.json",
+    "purpose": "Template barycentric regression case test_1: case.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_1/template_barycentric_test_1_preflight.json",
+    "purpose": "Template barycentric regression case test_1: preflight.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_1/template_barycentric_test_1_source.json",
+    "purpose": "Template barycentric regression case test_1: source.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_1/template_barycentric_test_1_source.vtk",
+    "purpose": "Template barycentric regression case test_1: source.vtk."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_1/template_barycentric_test_1_template.json",
+    "purpose": "Template barycentric regression case test_1: template.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_1/template_barycentric_test_1_template.vtk",
+    "purpose": "Template barycentric regression case test_1: template.vtk."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_2/template_barycentric_test_2_boundary_correspondence.json",
+    "purpose": "Template barycentric regression case test_2: boundary_correspondence.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_2/template_barycentric_test_2_case.json",
+    "purpose": "Template barycentric regression case test_2: case.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_2/template_barycentric_test_2_preflight.json",
+    "purpose": "Template barycentric regression case test_2: preflight.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_2/template_barycentric_test_2_source.json",
+    "purpose": "Template barycentric regression case test_2: source.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_2/template_barycentric_test_2_source.vtk",
+    "purpose": "Template barycentric regression case test_2: source.vtk."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_2/template_barycentric_test_2_template.json",
+    "purpose": "Template barycentric regression case test_2: template.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_2/template_barycentric_test_2_template.vtk",
+    "purpose": "Template barycentric regression case test_2: template.vtk."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_a/template_barycentric_test_a_boundary_correspondence.json",
+    "purpose": "Template barycentric regression case test_a: boundary_correspondence.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_a/template_barycentric_test_a_case.json",
+    "purpose": "Template barycentric regression case test_a: case.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_a/template_barycentric_test_a_preflight.json",
+    "purpose": "Template barycentric regression case test_a: preflight.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_a/template_barycentric_test_a_source.json",
+    "purpose": "Template barycentric regression case test_a: source.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_a/template_barycentric_test_a_source.vtk",
+    "purpose": "Template barycentric regression case test_a: source.vtk."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_a/template_barycentric_test_a_template.json",
+    "purpose": "Template barycentric regression case test_a: template.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_a/template_barycentric_test_a_template.vtk",
+    "purpose": "Template barycentric regression case test_a: template.vtk."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_hole/template_barycentric_test_hole_boundary_correspondence.json",
+    "purpose": "Template barycentric regression case test_hole: boundary_correspondence.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_hole/template_barycentric_test_hole_case.json",
+    "purpose": "Template barycentric regression case test_hole: case.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_hole/template_barycentric_test_hole_preflight.json",
+    "purpose": "Template barycentric regression case test_hole: preflight.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_hole/template_barycentric_test_hole_source.json",
+    "purpose": "Template barycentric regression case test_hole: source.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_hole/template_barycentric_test_hole_source.vtk",
+    "purpose": "Template barycentric regression case test_hole: source.vtk."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_hole/template_barycentric_test_hole_template.json",
+    "purpose": "Template barycentric regression case test_hole: template.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_hole/template_barycentric_test_hole_template.vtk",
+    "purpose": "Template barycentric regression case test_hole: template.vtk."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_mesh_1/template_barycentric_test_mesh_1_case.json",
+    "purpose": "Template barycentric regression case test_mesh_1: case.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_mesh_1/template_barycentric_test_mesh_1_preflight.json",
+    "purpose": "Template barycentric regression case test_mesh_1: preflight.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_tube/template_barycentric_test_tube_boundary_correspondence.json",
+    "purpose": "Template barycentric regression case test_tube: boundary_correspondence.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_tube/template_barycentric_test_tube_case.json",
+    "purpose": "Template barycentric regression case test_tube: case.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_tube/template_barycentric_test_tube_preflight.json",
+    "purpose": "Template barycentric regression case test_tube: preflight.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_tube/template_barycentric_test_tube_source.json",
+    "purpose": "Template barycentric regression case test_tube: source.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_tube/template_barycentric_test_tube_source.vtk",
+    "purpose": "Template barycentric regression case test_tube: source.vtk."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_tube/template_barycentric_test_tube_source_mixed.json",
+    "purpose": "Template barycentric regression case test_tube: source_mixed.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_tube/template_barycentric_test_tube_source_mixed.vtk",
+    "purpose": "Template barycentric regression case test_tube: source_mixed.vtk."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_tube/template_barycentric_test_tube_template.json",
+    "purpose": "Template barycentric regression case test_tube: template.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_generated/template_barycentric_test_tube/template_barycentric_test_tube_template.vtk",
+    "purpose": "Template barycentric regression case test_tube: template.vtk."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_leaflet/template_barycentric_leaflet_source.json",
+    "purpose": "Leaflet source mesh for template barycentric remeshing and landmark regression tests."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_leaflet/template_barycentric_leaflet_source.json.vtk",
+    "purpose": "Leaflet source mesh for template barycentric remeshing and landmark regression tests."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_leaflet/template_barycentric_leaflet_template.json",
+    "purpose": "Leaflet template mesh for template barycentric remeshing and landmark regression tests."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_leaflet/template_barycentric_leaflet_template.json.vtk",
+    "purpose": "Leaflet template mesh for template barycentric remeshing and landmark regression tests."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_test_mesh_1.json",
+    "purpose": "Curved patch input for template barycentric regression tests: test_mesh_1.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_test_mesh_1.vtk",
+    "purpose": "Curved patch input for template barycentric regression tests: test_mesh_1.vtk."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_test_mesh_1_boundary_segments.json",
+    "purpose": "Curved patch input for template barycentric regression tests: test_mesh_1_boundary_segments.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_test_template_1.json",
+    "purpose": "Curved patch input for template barycentric regression tests: test_template_1.json."
+  },
+  {
+    "path": "test/data/template_barycentric_fixture/template_barycentric_test_template_1.vtk",
+    "purpose": "Curved patch input for template barycentric regression tests: test_template_1.vtk."
+  },
+  {
+    "path": "test/data/test_data_notes.txt",
+    "purpose": "Local test input notes and instructions."
+  }
+]

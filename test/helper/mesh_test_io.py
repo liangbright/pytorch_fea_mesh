@@ -98,14 +98,14 @@ def save_feature_vtk(source_mesh, directory, *, feature_point_index_list=None,
             point_ids = []
         lines.node_data['source_point_index'] = torch.tensor(point_ids).reshape(-1, 1)
         lines.element_data['source_edge_index'] = torch.tensor(ids).reshape(-1, 1)
-        path = directory / 'feature_edges.vtk'
+        path = directory / f'isotropic_remesher_{directory.name}_feature_edges.vtk'
         lines.save_as_vtk(str(path))
         _check_feature_vtk(path, lines.node, lines.element.tolist(), vtk.VTK_LINE, point_ids, ids)
         paths['feature_edges_file'] = str(path.resolve())
     if feature_point_index_list is not None:
         ids = _feature_index_list(feature_point_index_list, len(nodes))
         points = nodes[ids]
-        path = directory / 'feature_points.vtk'
+        path = directory / f'isotropic_remesher_{directory.name}_feature_points.vtk'
         save_point_as_vtk(points, str(path))
         # The library writes coordinates only. Add VTK vertex cells so the
         # points display directly in ParaView, plus their original source IDs.
@@ -136,8 +136,8 @@ def save_mesh_pair(source_mesh, output_mesh, directory, *, feature_point_index_l
     """Save the triangle input/output and optional feature selections together."""
     directory = Path(directory)
     return dict(
-        source_mesh_file=save_mesh_vtk(source_mesh, directory / 'source_mesh.vtk'),
-        output_mesh_file=save_mesh_vtk(output_mesh, directory / 'output_mesh.vtk'),
+        source_mesh_file=save_mesh_vtk(source_mesh, directory / f'isotropic_remesher_{directory.name}_source_mesh.vtk'),
+        output_mesh_file=save_mesh_vtk(output_mesh, directory / f'isotropic_remesher_{directory.name}_output_mesh.vtk'),
         **save_feature_vtk(source_mesh, directory,
             feature_point_index_list=feature_point_index_list,
             feature_edge_index_list=feature_edge_index_list),

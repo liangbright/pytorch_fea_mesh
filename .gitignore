@@ -1,5 +1,6 @@
-# Private/local test data: never commit this directory.
-/data/
+# Keep only the input inventory; datasets and run outputs remain local.
+/data/*
+!/data/data_record.json
 
 # Generated files and local environments.
 __pycache__/

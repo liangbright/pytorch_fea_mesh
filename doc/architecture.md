@@ -25,6 +25,8 @@ through split, collapse, and flip operations. Its mutable state belongs to each
 call. See [remeshing](remeshing.md) for geometry constraints, feature protection,
 and output behavior.
 
-Tests use synthetic geometry and temporary output directories. Optional local
-input files belong in `data/`, which is ignored by version control and excluded
-from package distributions.
+Tests use synthetic geometry and separately shared inputs under `data/test/data/`.
+Example inputs belong in `data/example/data/`. Test results are retained in
+`data/test/<run-id>/output/`, grouped by test module and case. Only the input
+inventory, `data/data_record.json`, is tracked and included in source packages;
+dataset files and generated outputs remain local.

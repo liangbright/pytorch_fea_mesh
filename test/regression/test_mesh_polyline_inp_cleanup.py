@@ -6,7 +6,7 @@ pytestmark = [pytest.mark.io]
 from contextlib import redirect_stdout
 import io
 from pathlib import Path
-import tempfile
+from test.helper.output import output_directory
 import unittest
 
 import numpy as np
@@ -65,8 +65,8 @@ class PolylineAdjacencyTest(unittest.TestCase):
 
 class INPPreRelabelCleanupTest(unittest.TestCase):
     def read(self, body, remove):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'mesh.inp'
+        with output_directory('polyline_inp_cleanup') as directory:
+            path = Path(directory) / 'polyline_inp_cleanup_mesh.inp'
             path.write_text(body)
             with redirect_stdout(io.StringIO()):
                 return read_abaqus_inp(str(path), remove_unused_node=remove)

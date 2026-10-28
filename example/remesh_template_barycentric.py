@@ -13,7 +13,7 @@ from torch_fea_mesh.processing.template_barycentric_mapping_based_remesher impor
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=Path('data/example/template_barycentric'))
+    parser.add_argument('--output', type=Path, default=Path(__file__).resolve().parents[1] / 'data/example/template_barycentric_output')
     parser.add_argument('--landmark', action='store_true')
     args = parser.parse_args()
     source = PolygonMesh(torch.tensor([
@@ -31,7 +31,7 @@ def main():
         landmark_of_template_mesh=[4] if args.landmark else None)
     args.output.mkdir(parents=True, exist_ok=True)
     for name, mesh in [('source', source), ('template', template), ('remeshed', output)]:
-        mesh.save_as_vtk(str(args.output / f'{name}.vtk'))
+        mesh.save_as_vtk(str(args.output / f'template_barycentric_{name}.vtk'))
     report = output.mesh_data['template_barycentric_mapping_based_remesh']
     print('Selected diffusion coefficient:', report['auto_diffusion']['selected_coefficient'])
     print('Stretch history:', report['stretch_history'])

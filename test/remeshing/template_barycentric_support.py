@@ -7,16 +7,16 @@ import numpy as np
 import torch
 
 from torch_fea_mesh.mesh.polygon_mesh import PolygonMesh
+from test.helper.data import input_dir, require_file
 
-PROJECT = Path(__file__).resolve().parent / "fixture/template_barycentric"
 DIAGNOSTIC_KEY = "template_barycentric_mapping_based_remesh"
 
 
 def load_mesh(path):
-    path = Path(path)
+    path = require_file(path)
     meta = json.loads(path.read_text())
     vtk = path.parent / meta["PointAndFace"]
-    lines = vtk.read_text().splitlines()
+    lines = require_file(vtk).read_text().splitlines()
     if lines[2].strip() != "ASCII" or lines[3].strip() != "DATASET POLYDATA":
         raise ValueError("Fixture reader accepts legacy ASCII POLYDATA only")
     tokens = " ".join(lines[4:]).split()
@@ -74,17 +74,18 @@ def triangulate_source(mesh):
 
 
 def load_cases():
-    root = PROJECT / "TestData2"
-    source = triangulate_source(load_mesh(root/"OutputLeaflet_1_2017_5_18_17_0.json"))
-    template = load_mesh(root/"TemplateMesh_9.json")
+    project = input_dir() / 'template_barycentric_fixture'
+    root = project / 'template_barycentric_leaflet'
+    source = triangulate_source(load_mesh(root/'template_barycentric_leaflet_source.json'))
+    template = load_mesh(root/'template_barycentric_leaflet_template.json')
     cases = [{"case_id": "testdata2", "source": source, "template": template,
               "source_segments": prepare_segments(source.node_set, source.mapping_from_node_name_to_index),
               "template_segments": prepare_segments(template.node_set, template.mapping_from_node_name_to_index)}]
-    manifest = json.loads((PROJECT/"TestDataGenerated/manifest.json").read_text())
+    manifest = json.loads(require_file(project/'template_barycentric_generated/template_barycentric_manifest.json').read_text())
     for fixture in manifest["fixtures"]:
-        corr = json.loads((PROJECT/fixture["files"]["correspondence"]).read_text())
-        cases.append({"case_id": fixture["case_id"], "source": load_mesh(PROJECT/fixture["files"]["source_json"]),
-                      "template": load_mesh(PROJECT/fixture["files"]["template_json"]),
+        corr = json.loads(require_file(project/fixture["files"]["correspondence"]).read_text())
+        cases.append({"case_id": fixture["case_id"], "source": load_mesh(project/fixture["files"]["source_json"]),
+                      "template": load_mesh(project/fixture["files"]["template_json"]),
                       "source_segments": corr["boundary_segment_list_of_source_mesh"],
                       "template_segments": corr["boundary_segment_list_of_template_mesh"]})
     return cases

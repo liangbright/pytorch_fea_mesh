@@ -82,7 +82,7 @@ torch_fea_mesh/
 test/           # Automated tests
 example/        # Runnable examples with generated inputs
 doc/            # Installation, API, architecture, and testing guides
-data/           # Optional local data; excluded from version control and builds
+data/           # Local inputs/results; only data_record.json is tracked
 ```
 
 ## Testing
@@ -98,7 +98,10 @@ python -m pytest test/remeshing/ -v
 
 Optional-feature and CUDA tests report skips when their dependencies or hardware
 are unavailable. The [testing guide](doc/testing.md) explains test selection,
-coverage, and optional local data.
+coverage, shared input files, and retained test outputs. Only the path-and-purpose
+inventory [data_record.json](data/data_record.json) is tracked; obtain datasets
+separately and place test inputs in `data/test/data/` and example inputs in
+`data/example/data/`. Each test run saves files in `data/test/<run-id>/output/`.
 
 ## Contributing
 

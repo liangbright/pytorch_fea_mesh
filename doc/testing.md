@@ -35,32 +35,60 @@ reasons when assessing coverage.
 
 The suite includes `unittest.TestCase` regressions collected by pytest. Synthetic
 mesh helpers live under `test/helper/`. Generated files, including VTK exports,
-use temporary directories. Tests are included in the source distribution.
+are retained under `data/test/<run-id>/output/`. Each run gets a unique ID, and
+subfolders identify the test module and case. Pytest prints the output location
+at the start and end of the run. Tests are included in the source distribution.
 
 ## Local test data
 
-The default suite needs no external dataset. Optional local files belong in the
-root `data/` directory, which is ignored by version control and excluded from
-package builds. Create the directory if needed:
+Input files are shared separately and remain on the local computer:
 
-```bash
-mkdir -p data
+```text
+data/
+  data_record.json                 # Tracked relative paths and purposes
+  test/
+    data/                          # Local test inputs
+      template_barycentric_fixture/
+      isotropic_remesher_fixture/
+      local_mesh_archive/
+    test_<timestamp>_<suffix>/
+      output/                      # Retained results, grouped by test
+  example/
+    data/                          # Local example inputs, when needed
+    <example-prefix>_output/        # Generated example files
 ```
 
-To exercise the optional local remeshing check, place a nonempty triangular
-surface in `data/triangle_surface.vtk`, then run:
+Only `data/data_record.json` is tracked in Git and included in source packages.
+Its paths are relative to `data/`. It contains only `path` and `purpose` entries;
+editing input contents does not require updating it. Add or update entries when
+paths or purposes change. Dataset files and generated outputs are ignored by Git
+and excluded from packages. Sharing links can be posted on GitHub separately.
+Use a descriptive feature/case prefix for input folders and filenames.
+
+Place shared files at the recorded paths. Tests that require missing files
+report explicit skips; synthetic tests still run. A full validation includes the
+shared inputs and reviews all skip reasons. Tests do not rewrite the input record.
+
+The local isotropic remesher check reads
+`data/test/data/isotropic_remesher_fixture/isotropic_remesher_triangle_surface.vtk`:
 
 ```bash
 python -m pytest test/test_local_data.py -v
 
-# Use a sibling directory containing triangle_surface.vtk.
-python -m pytest test/test_local_data.py --data-dir ../local_data -v
+# Alternate input root with the same feature subfolders.
+python -m pytest test/ --data-dir /path/to/test/data -v
 ```
 
-The check runs one remeshing iteration using the median source edge length,
-freezes the boundary, checks source immutability, and writes the result to a
-temporary directory. Input files are never modified. Quadrilateral meshes need
-to be triangulated before use with this triangle-specific test.
+The `--data-dir` option applies to all dataset-backed tests, including the
+barycentric remesher. Default paths are resolved from the checkout, independently
+of the shell's working directory. Standalone unittest runs can set
+`TORCH_FEA_MESH_TEST_DATA` to select an alternate input root.
+
+The local surface check runs one remeshing iteration using the median source
+edge length, freezes the boundary, and checks source immutability. Its VTK result
+is retained in the current run's output folder. Quadrilateral inputs need to be
+triangulated before use with this triangle-specific test. Serialization tests
+also retain their generated files, including inputs created during a test.
 
 ## Transform checks
 
@@ -76,5 +104,6 @@ python -m pytest test/test_transform.py -k rodrigues -v
 
 Build a wheel and install it normally in a separate environment with matching
 dependencies. Copy `test/` and `pyproject.toml` into a separate test directory,
-then run `python -m pytest test/ -v` from there. Running outside the source
+provide the shared inputs under `data/test/data/` (or select them with
+`--data-dir`), then run `python -m pytest test/ -v` from there. Running outside the source
 project prevents local files from masking missing wheel contents.

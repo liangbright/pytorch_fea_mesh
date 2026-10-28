@@ -53,9 +53,13 @@ describe geometry; `_index_list` describes an index sequence.
 ## Testing
 
 Add tests under `test/` for new behavior and select the applicable registered
-markers. Use synthetic data and temporary output paths whenever possible.
+markers. Prefer synthetic geometry where practical. Keep shared inputs under
+`data/test/data/` or `data/example/data/` with descriptive feature/case prefixes.
+Use the `test_output_dir` fixture or `test.helper.output` helpers for retained
+outputs under `data/test/<run-id>/output/`.
 The remesher regression suite belongs under `test/remeshing/`.
 
 Run the relevant tests before broader checks; see [testing](doc/testing.md) for
 full and partial commands. Report test results and skipped dependencies explicitly.
-Never commit local `data/`, generated outputs, or virtual environments.
+Track only `data/data_record.json`, with relative paths and purposes, under
+`data/`. Never commit the dataset files, generated outputs, or virtual environments.

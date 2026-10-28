@@ -6,10 +6,27 @@ import torch
 
 from torch_fea_mesh.mesh.triangle_mesh import TriangleMesh
 from torch_fea_mesh.mesh.tetrahedron_mesh import TetrahedronMesh
+from test.helper.data import input_dir
+from test.helper.output import create_run_output, test_output_path
 
 
 def pytest_addoption(parser):
-    parser.addoption("--data-dir", default=None, help="Directory of optional local test data")
+    parser.addoption("--data-dir", default=None, help="Test input root (default: data/test/data)")
+
+
+def pytest_configure(config):
+    if not config.option.collectonly:
+        config._mesh_test_output = create_run_output()
+
+
+def pytest_report_header(config):
+    if hasattr(config, '_mesh_test_output'):
+        return f'Test outputs: {config._mesh_test_output}'
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    if hasattr(config, '_mesh_test_output'):
+        terminalreporter.write_line(f'Test outputs retained in: {config._mesh_test_output}')
 
 
 def pytest_collection_modifyitems(items):
@@ -32,16 +49,28 @@ def single_threaded_torch():
     torch.set_num_threads(previous)
 
 
-@pytest.fixture(autouse=True)
-def temporary_remeshing_output(request, tmp_path, monkeypatch):
-    if request.node.get_closest_marker("remeshing"):
-        monkeypatch.setenv("TORCH_FEA_MESH_TEST_OUTPUT", str(tmp_path))
+@pytest.fixture(scope="session", autouse=True)
+def configured_test_data(request):
+    with pytest.MonkeyPatch.context() as patch:
+        path = request.config.getoption('--data-dir')
+        if path:
+            patch.setenv('TORCH_FEA_MESH_TEST_DATA', str(Path(path).expanduser().resolve()))
+        yield input_dir()
 
 
 @pytest.fixture
-def local_data_dir(request):
-    path = request.config.getoption("--data-dir")
-    return Path(path).expanduser().resolve() if path else request.config.rootpath / "data"
+def test_output_dir(request):
+    return test_output_path(request.config._mesh_test_output, request.node.nodeid)
+
+
+@pytest.fixture(autouse=True)
+def retained_test_output(test_output_dir, monkeypatch):
+    monkeypatch.setenv('TORCH_FEA_MESH_TEST_OUTPUT', str(test_output_dir))
+
+
+@pytest.fixture
+def local_data_dir(configured_test_data):
+    return configured_test_data
 
 
 @pytest.fixture
