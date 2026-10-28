@@ -38,12 +38,15 @@ from torch_fea_mesh.processing.polyhedron_mesh_processing import extract_surface
 from torch_fea_mesh.processing.isotropic_triangle_surface_remesher import (
     isotropic_triangle_surface_remesh,
 )
+from torch_fea_mesh.processing.template_barycentric_mapping_based_remesher import (
+    template_barycentric_mapping_based_remesh,
+)
 ```
 
 Processing includes connectivity queries, smoothing, repair, surface extraction,
 clipping, and remeshing. VTK-based operations require the `vtk` extra. The
-[remeshing guide](remeshing.md) documents isotropic remeshing parameters, feature
-constraints, and source immutability.
+[remeshing guide](remeshing.md) documents isotropic and template barycentric remeshing,
+constraints, optional dependencies, and source immutability.
 
 ## Generation
 

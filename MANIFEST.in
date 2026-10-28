@@ -6,3 +6,4 @@ prune data
 prune output
 prune test_output
 global-exclude __pycache__ *.py[cod]
+recursive-include test/remeshing/fixture *.json *.vtk

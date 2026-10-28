@@ -63,6 +63,9 @@ remeshed = isotropic_triangle_surface_remesh(
 )
 ```
 
+Template barycentric remeshing is available with the `remeshing` extra. See
+`example/remesh_template_barycentric.py` for boundary and interior landmark examples.
+
 See the [API overview](doc/api.md), [remeshing guide](doc/remeshing.md), and
 [runnable examples](example/README.md).
 

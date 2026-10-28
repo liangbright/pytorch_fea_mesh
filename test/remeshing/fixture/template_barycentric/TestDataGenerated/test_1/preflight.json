@@ -1,0 +1,147 @@
+{
+  "scope": "input preparation checks only",
+  "remeshing_executed": false,
+  "parameterization_solved": false,
+  "source": {
+    "node_count": 475,
+    "element_count": 864,
+    "element_sizes": {
+      "3": 864
+    },
+    "edge_count": 1338,
+    "boundary_node_count": 84,
+    "boundary_edge_count": 84,
+    "boundary_loop_count": 1,
+    "euler_characteristic": 1,
+    "connected_component_count": 1,
+    "unused_node_count": 0,
+    "nonmanifold_edge_count": 0,
+    "inconsistent_oriented_edge_count": 0,
+    "minimum_triangle_area_after_triangulation": 0.0007398766390781492,
+    "total_triangle_area_after_triangulation": 3.115798310184821,
+    "constraint_node_count": 84,
+    "free_node_count": 391,
+    "bounds": {
+      "min": [
+        -1.2,
+        -0.75,
+        -0.14369987055130093
+      ],
+      "max": [
+        1.2,
+        0.75,
+        0.28875521211068683
+      ]
+    },
+    "all_z_zero": false,
+    "segments": {
+      "upper": {
+        "kind": "open_boundary",
+        "node_count": 43,
+        "unique_node_count": 43,
+        "first": 225,
+        "last": 249,
+        "length": 3.150749195294339
+      },
+      "lower": {
+        "kind": "open_boundary",
+        "node_count": 43,
+        "unique_node_count": 43,
+        "first": 225,
+        "last": 249,
+        "length": 3.144931133088717
+      }
+    },
+    "named_points": {
+      "LC": {
+        "index": 225,
+        "position": [
+          -1.2,
+          0.0,
+          -0.08
+        ],
+        "on_boundary": true
+      },
+      "RC": {
+        "index": 249,
+        "position": [
+          1.2,
+          0.0,
+          0.08
+        ],
+        "on_boundary": true
+      }
+    }
+  },
+  "template": {
+    "node_count": 247,
+    "element_count": 216,
+    "element_sizes": {
+      "4": 216
+    },
+    "edge_count": 462,
+    "boundary_node_count": 60,
+    "boundary_edge_count": 60,
+    "boundary_loop_count": 1,
+    "euler_characteristic": 1,
+    "connected_component_count": 1,
+    "unused_node_count": 0,
+    "nonmanifold_edge_count": 0,
+    "inconsistent_oriented_edge_count": 0,
+    "minimum_triangle_area_after_triangulation": 0.0014437650818742078,
+    "total_triangle_area_after_triangulation": 2.3511902893325196,
+    "constraint_node_count": 60,
+    "free_node_count": 187,
+    "bounds": {
+      "min": [
+        -1.0,
+        -0.75,
+        0.0
+      ],
+      "max": [
+        1.0,
+        0.75,
+        0.0
+      ]
+    },
+    "all_z_zero": true,
+    "segments": {
+      "upper": {
+        "kind": "open_boundary",
+        "node_count": 31,
+        "unique_node_count": 31,
+        "first": 114,
+        "last": 132,
+        "length": 2.7613476696935875
+      },
+      "lower": {
+        "kind": "open_boundary",
+        "node_count": 31,
+        "unique_node_count": 31,
+        "first": 114,
+        "last": 132,
+        "length": 2.7613476696935875
+      }
+    },
+    "named_points": {
+      "LC": {
+        "index": 114,
+        "position": [
+          -1.0,
+          0.0,
+          0.0
+        ],
+        "on_boundary": true
+      },
+      "RC": {
+        "index": 132,
+        "position": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "on_boundary": true
+      }
+    }
+  }
+}

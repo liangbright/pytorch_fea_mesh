@@ -26,6 +26,7 @@ The import name is `torch_fea_mesh`; the distribution name is `torch-fea-mesh`.
 | Extra | Purpose | Installation |
 | --- | --- | --- |
 | `vtk` | VTK I/O, VTK-based processing, and isotropic remeshing | `python -m pip install '.[vtk]'` |
+| `remeshing` | Template barycentric remeshing with SciPy | `python -m pip install '.[remeshing]'` |
 | `chamfer` | Chamfer distance with PyTorch Geometric and its KNN backend | `python -m pip install '.[chamfer]'` |
 | `dev` | pytest, build tools, and distribution checks | `python -m pip install -e '.[dev]'` |
 

@@ -1,0 +1,38 @@
+{
+  "case_id": "test_hole",
+  "title": "Spherical band with a landmark",
+  "reference": "test_hole",
+  "description": "Two explicitly closed loops and one interior singleton landmark; annular-domain extension case.",
+  "parameters": {
+    "source_angle_count": 32,
+    "source_ring_count": 9,
+    "template_angle_count": 64,
+    "template_ring_count": 7,
+    "sphere_radius": 1.5,
+    "polar_angle_range": [
+      0.35,
+      1.1
+    ],
+    "template_radii": [
+      0.3,
+      1.0
+    ],
+    "landmark_radial_fraction": 0.5,
+    "landmark_angle": "pi/2",
+    "convex_disk_guarantee_applies": false,
+    "coordinate_units": "synthetic units"
+  },
+  "provenance": "Synthetic fixture following the MDK example structure; not a reproduction of the absent original asset.",
+  "files": {
+    "source_vtk": "TestDataGenerated/test_hole/source.vtk",
+    "source_json": "TestDataGenerated/test_hole/source.json",
+    "template_vtk": "TestDataGenerated/test_hole/template.vtk",
+    "template_json": "TestDataGenerated/test_hole/template.json",
+    "correspondence": "TestDataGenerated/test_hole/boundary_correspondence.json",
+    "preflight": "TestDataGenerated/test_hole/preflight.json",
+    "case": "TestDataGenerated/test_hole/case.json"
+  },
+  "preview": "TestDataGenerated/test_hole/preview.png",
+  "approval_status": "awaiting_user_review",
+  "remeshing_executed": false
+}

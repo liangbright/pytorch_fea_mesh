@@ -15,6 +15,9 @@ def pytest_addoption(parser):
 def pytest_collection_modifyitems(items):
     # External pytest hook name: preserve its spelling for hook discovery.
     for item in items:
+        if item.path.name.startswith("test_template_barycentric"):
+            item.add_marker(pytest.mark.remeshing)
+            item.add_marker(pytest.mark.processing)
         if "cuda" in item.name.lower():
             item.add_marker(pytest.mark.gpu)
         if item.get_closest_marker("gpu") and not torch.cuda.is_available():

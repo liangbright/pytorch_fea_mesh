@@ -1,0 +1,87 @@
+{
+  "Name": "test_mesh_1_template",
+  "ObjectType": "PolygonMesh",
+  "ScalarType": "double",
+  "IndexType": "int64",
+  "PointCount": 143,
+  "FaceCount": 120,
+  "PointAndFace": "test_template_1.vtk",
+  "PointSetCount": 4,
+  "PointSetList": [
+    {
+      "bottom": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12
+      ]
+    },
+    {
+      "right": [
+        12,
+        25,
+        38,
+        51,
+        64,
+        77,
+        90,
+        103,
+        116,
+        129,
+        142
+      ]
+    },
+    {
+      "top": [
+        142,
+        141,
+        140,
+        139,
+        138,
+        137,
+        136,
+        135,
+        134,
+        133,
+        132,
+        131,
+        130
+      ]
+    },
+    {
+      "left": [
+        130,
+        117,
+        104,
+        91,
+        78,
+        65,
+        52,
+        39,
+        26,
+        13,
+        0
+      ]
+    }
+  ],
+  "NamedPointCount": 4,
+  "NamedPointList": {
+    "lower_left": 0,
+    "lower_right": 12,
+    "upper_right": 142,
+    "upper_left": 130
+  },
+  "FaceSetCount": 0,
+  "FaceSetList": [],
+  "IndexBase": 0,
+  "PreparedForReview": true
+}

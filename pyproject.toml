@@ -12,6 +12,7 @@ dependencies = ["numpy", "torch", "torch-scatter"]
 
 [project.optional-dependencies]
 vtk = ["vtk"]
+remeshing = ["scipy>=1.14"]
 chamfer = ["torch-geometric>=2.8", "pyg-lib>=0.6"]
 dev = ["pytest>=7", "build", "twine"]
 
@@ -38,7 +39,7 @@ markers = [
     "io: mesh serialization, INP, and VTK",
     "vtk: requires the optional VTK dependency",
     "chamfer: requires PyTorch Geometric and its KNN backend",
-    "remeshing: isotropic triangle surface remeshing",
+    "remeshing: isotropic and template barycentric surface remeshing",
     "gpu: requires a CUDA device",
     "slow: longer running tests",
     "local_data: optional checks using the ignored local data directory",

@@ -61,3 +61,48 @@ python -m pytest test/remeshing/ -v
 
 See the [synthetic example](../example/remesh_surface.py) and the
 [testing guide](testing.md) for optional checks against local data.
+
+## Template barycentric mapping
+
+Install `torch-fea-mesh[remeshing]` for SciPy. Add the `vtk` extra for VTK export.
+
+```python
+from torch_fea_mesh.processing.template_barycentric_mapping_based_remesher import (
+    template_barycentric_mapping_based_remesh,
+)
+
+result = template_barycentric_mapping_based_remesh(
+    source_mesh, source_boundary_segment_list,
+    template_mesh, template_boundary_segment_list,
+    landmark_of_source_mesh=None,
+    landmark_of_template_mesh=None,
+)
+```
+
+The source is a connected, consistently oriented triangular `PolygonMesh` with
+boundary and genus zero. The template is a planar polygon mesh with z equal to
+zero. Output preserves template connectivity and metadata. Pair ordered boundary
+paths with corresponding direction and endpoints, covering every boundary edge.
+Sampling counts can differ: positions correspond by relative arc length. Repeat
+the initial vertex for a closed path. Paired landmark indices fix additional
+correspondences.
+
+Initialization choices are `untangle` (default), `averaged_barycentric`,
+`mean_value`, and `annular`; see the function docstring for their assumptions.
+Automatic diffusion selection supports triangle and quad templates. Set
+`diffusion_coefficient_of_mesh_parameterization` to a number in [0, 1] to use a
+fixed coefficient. Solver choices are `sparse_lu`, `gmres`, and `bicgstab`.
+Calculations use CPU NumPy/SciPy arrays and are not differentiable. Inputs are
+preserved. Diagnostics are stored in
+`result.mesh_data['template_barycentric_mapping_based_remesh']`.
+
+Run the boundary mapping and interior landmark examples from the repository:
+
+```sh
+python example/remesh_template_barycentric.py --output /tmp/barycentric_boundary
+python example/remesh_template_barycentric.py --landmark --output /tmp/barycentric_landmark
+python -m pytest test/remeshing/test_template_barycentric*.py
+```
+
+The regression tests bundle their input fixtures and do not need the original
+development checkout or generated result files.

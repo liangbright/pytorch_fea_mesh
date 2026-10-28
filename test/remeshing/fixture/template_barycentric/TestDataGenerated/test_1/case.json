@@ -1,0 +1,33 @@
+{
+  "case_id": "test_1",
+  "title": "Twisted leaflet-like patch",
+  "reference": "Test_1",
+  "description": "Two ordered boundary arcs both run LC to RC, with different source/template sampling.",
+  "parameters": {
+    "source_grid": [
+      25,
+      19
+    ],
+    "template_grid": [
+      19,
+      13
+    ],
+    "disk_map": "u=a*sqrt(1-b*b/2); v=b*sqrt(1-a*a/2), a=2*s-1, b=2*t-1",
+    "geometry_variant": 1,
+    "source_diagonal": "shortest; at 3-boundary-vertex cells choose the diagonal through the interior vertex to avoid a fully constrained ear",
+    "coordinate_units": "synthetic units"
+  },
+  "provenance": "Synthetic fixture following the MDK example structure; not a reproduction of the absent original asset.",
+  "files": {
+    "source_vtk": "TestDataGenerated/test_1/source.vtk",
+    "source_json": "TestDataGenerated/test_1/source.json",
+    "template_vtk": "TestDataGenerated/test_1/template.vtk",
+    "template_json": "TestDataGenerated/test_1/template.json",
+    "correspondence": "TestDataGenerated/test_1/boundary_correspondence.json",
+    "preflight": "TestDataGenerated/test_1/preflight.json",
+    "case": "TestDataGenerated/test_1/case.json"
+  },
+  "preview": "TestDataGenerated/test_1/preview.png",
+  "approval_status": "awaiting_user_review",
+  "remeshing_executed": false
+}

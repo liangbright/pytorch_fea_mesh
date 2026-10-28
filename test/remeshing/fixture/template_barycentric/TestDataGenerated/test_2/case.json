@@ -1,0 +1,33 @@
+{
+  "case_id": "test_2",
+  "title": "Sinusoidal patch",
+  "reference": "Test_2",
+  "description": "Two ordered boundary arcs both run LC to RC, with different source/template sampling.",
+  "parameters": {
+    "source_grid": [
+      31,
+      23
+    ],
+    "template_grid": [
+      17,
+      11
+    ],
+    "disk_map": "u=a*sqrt(1-b*b/2); v=b*sqrt(1-a*a/2), a=2*s-1, b=2*t-1",
+    "geometry_variant": 2,
+    "source_diagonal": "shortest; at 3-boundary-vertex cells choose the diagonal through the interior vertex to avoid a fully constrained ear",
+    "coordinate_units": "synthetic units"
+  },
+  "provenance": "Synthetic fixture following the MDK example structure; not a reproduction of the absent original asset.",
+  "files": {
+    "source_vtk": "TestDataGenerated/test_2/source.vtk",
+    "source_json": "TestDataGenerated/test_2/source.json",
+    "template_vtk": "TestDataGenerated/test_2/template.vtk",
+    "template_json": "TestDataGenerated/test_2/template.json",
+    "correspondence": "TestDataGenerated/test_2/boundary_correspondence.json",
+    "preflight": "TestDataGenerated/test_2/preflight.json",
+    "case": "TestDataGenerated/test_2/case.json"
+  },
+  "preview": "TestDataGenerated/test_2/preview.png",
+  "approval_status": "awaiting_user_review",
+  "remeshing_executed": false
+}
