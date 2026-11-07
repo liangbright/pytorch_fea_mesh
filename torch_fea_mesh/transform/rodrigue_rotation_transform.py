@@ -4,11 +4,11 @@ from torch import cos, sin
 from torch.linalg import matmul, norm
 #%%  https://mathworld.wolfram.com/RodriguesRotationFormula.html
 class RodrigueRotationTransform3D(nn.Module):
-    def __init__(self):
+    def __init__(self, dtype=None):
         super().__init__()
-        self.axis=nn.Parameter(torch.rand(3))
-        self.angle=nn.Parameter(torch.zeros(1))
-        self.origin=nn.Parameter(torch.zeros(1,3))
+        self.axis=nn.Parameter(torch.rand(3, dtype=dtype))
+        self.angle=nn.Parameter(torch.zeros(1, dtype=dtype))
+        self.origin=nn.Parameter(torch.zeros(1,3, dtype=dtype))
         
     @staticmethod
     def cal_R(axis, angle):

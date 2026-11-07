@@ -158,7 +158,7 @@ def create_quad_mesh_rectangle_in_rectangle(n_ring=3, Nx=3, Ny=3, seal_hole=True
     output_mesh.node_set["line_da"]=np.arange(d, d+Ny-1).tolist()+[a]    
     return output_mesh
 #%%
-def create_quad_mesh_rectangle_in_cirlce(radius=1, n_ring=3, Nx=3, Ny=3, seal_hole=True):
+def create_quad_mesh_rectangle_in_circle(radius=1, n_ring=3, Nx=3, Ny=3, seal_hole=True):
     output_mesh=create_quad_mesh_rectangle_in_rectangle(n_ring=n_ring, Nx=Nx, Ny=Ny, seal_hole=seal_hole)
     # y
     #/|\

@@ -213,14 +213,14 @@ class MeshResetTest(unittest.TestCase):
             add_metadata(mesh)
             mesh.update_node_normal()
             before = deepcopy(vars(mesh))
-            with self.assertRaises(NotImplementedError):
+            with self.assertRaises(ValueError):
                 mesh.copy(node, element)
             self.assert_value_equal(vars(mesh), before)
 
     def test_vtk_reader_replaces_all_state_for_every_class(self):
         for dtype in DTYPES:
             for cls in CLASSES:
-                for reader in ('read_mesh_vtk', 'read_mesh_vtk_slow'):
+                for reader in ('read_mesh_vtk',):
                     with self.subTest(dtype=dtype, cls=cls.__name__, reader=reader):
                         source = fixture(cls, dtype)
                         source.node_data['new_field'] = torch.ones((len(source.node), 1), dtype=dtype)
@@ -316,7 +316,7 @@ class MeshResetTest(unittest.TestCase):
         with output_directory('mesh_reset') as directory:
             path = str(Path(directory) / 'mesh_reset_invalid.pt')
             torch.save({'node': [[0., 0., 0.]]}, path)
-            for reader in ('read_mesh_vtk', 'read_mesh_vtk_slow', 'load_from_torch'):
+            for reader in ('read_mesh_vtk', 'load_from_torch'):
                 with self.subTest(reader=reader):
                     mesh = fixture(TriangleMesh, torch.float64)
                     add_metadata(mesh)

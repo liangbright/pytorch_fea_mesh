@@ -21,8 +21,8 @@ class HexahedronMesh(PolyhedronMesh):
     def clear(self):
         super().clear()
 
-    def clear_geometry_derived_data(self):
-        super().clear_geometry_derived_data()
+    def clear_geometry_derived_data(self, clear_adjacency_data=True):
+        super().clear_geometry_derived_data(clear_adjacency_data)
         self.element_volume=None
 
     def build_edge(self):
@@ -47,7 +47,7 @@ class HexahedronMesh(PolyhedronMesh):
             edge.append([id1, id5])
             edge.append([id2, id6])
             edge.append([id3, id7])            
-        edge=np.array(edge, dtype=np.int64)
+        edge=np.array(edge, dtype=np.int64).reshape(-1,2)
         edge=np.sort(edge, axis=1)
         edge_unique, inverse=np.unique(edge, return_inverse=True, axis=0)
         self.edge=torch.tensor(edge_unique, dtype=torch.int64)
@@ -71,7 +71,7 @@ class HexahedronMesh(PolyhedronMesh):
             face.append([id1, id2, id6, id5])
             face.append([id2, id3, id7, id6])
             face.append([id3, id0, id4, id7])
-        face=np.array(face, dtype=np.int64)
+        face=np.array(face, dtype=np.int64).reshape(-1,4)
         face_sorted=np.sort(face, axis=1)
         face_sorted_unique, index, inverse=np.unique(face_sorted, return_index=True, return_inverse=True, axis=0)
         self.face=torch.tensor(face[index], dtype=torch.int64)
@@ -82,35 +82,25 @@ class HexahedronMesh(PolyhedronMesh):
     
     @staticmethod
     def cal_element_volume(node, element):
-        #X=self.node[self.element]#shape (M,8,3)
-        #r1i=get_integration_point_1i(X.dtype, X.device)
-        #dX_dr=cal_dh_dr(r1i, X)
-        #volumn=8*det(dX_dr)
-        #---------no need for FEA element---
-        #divide a hex8 to 12 tet4, and cal_vol of each tet4
-        def cal_vol(node0, node1, node2, node3):
-            a=node1-node0; b=node2-node0; c=node3-node0
-            vol=(1/6)*(cross(a,b)*c).sum(dim=-1).abs() 
-            return vol                   
-        x0=node[element[:,0]]
-        x1=node[element[:,1]]
-        x2=node[element[:,2]]
-        x3=node[element[:,3]]
-        x4=node[element[:,4]]
-        x5=node[element[:,5]]
-        x6=node[element[:,6]]
-        x7=node[element[:,7]]
-        volume=(cal_vol(x1,x2,x3,x5)
-               +cal_vol(x4,x7,x5,x3)
-               +cal_vol(x0,x4,x5,x3)
-               +cal_vol(x2,x5,x6,x3)
-               +cal_vol(x5,x7,x6,x3)
-               +cal_vol(x0,x5,x1,x3))
-        return volume
+        #volume of the trilinear C3D8 element: the integral of det(dX/dr) over r,s,t in [-1,1]
+        #2x2x2 Gauss integration is exact, because det(dX/dr) is quadratic in each of r,s,t
+        #so the result is correct for warped faces and does not depend on the local node numbering
+        x=1.0*node[element]#shape (M,8,3), 1.0* allows integer nodes
+        x=x-x[:,0:1]#relative to node 0, to keep precision far from the origin
+        #natural coordinates of the 8 nodes
+        r=torch.tensor([[-1,-1,-1],[1,-1,-1],[1,1,-1],[-1,1,-1],
+                        [-1,-1, 1],[1,-1, 1],[1,1, 1],[-1,1, 1]], dtype=x.dtype, device=x.device)
+        volume=0
+        for r_i in r/3**0.5:#8 integration points, each with weight 1
+            a=1+r*r_i#shape (8,3)
+            dh_dr=(r/8)*torch.stack([a[:,1]*a[:,2], a[:,0]*a[:,2], a[:,0]*a[:,1]], dim=1)#shape (8,3)
+            dx_dr=x.transpose(1,2)@dh_dr#shape (M,3,3), the columns are dx/dr, dx/ds, dx/dt
+            volume=volume+(cross(dx_dr[:,:,0], dx_dr[:,:,1])*dx_dr[:,:,2]).sum(dim=-1)
+        return volume.abs()#shape (M,)
 
     def subdivide(self):
         #draw a 3D figure and code this...
-        pass
+        raise NotImplementedError('subdivide is not implemented for HexahedronMesh')
 
     def get_sub_mesh(self, element_idx_list, return_node_idx_list=False):
         sub_mesh, node_idx_list=super().get_sub_mesh(element_idx_list, return_node_idx_list=True)

@@ -1,10 +1,6 @@
 """Automatic selection regressions: geometry, constraints and search behavior."""
 from copy import deepcopy
 import unittest
-from importlib.util import find_spec
-
-if find_spec("scipy") is None:
-    raise unittest.SkipTest("Install torch-fea-mesh[remeshing] for SciPy")
 from unittest.mock import patch
 
 import numpy as np

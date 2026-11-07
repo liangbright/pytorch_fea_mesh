@@ -8,7 +8,7 @@ from torch_fea_mesh.processing.mesh_processing import (
     segment_mesh_to_connected_region, simple_smoother, remove_unused_node,
 )
 from torch_fea_mesh.processing.polyhedron_mesh_processing import extract_surface_mesh
-from torch_fea_mesh.processing.repair_mesh import ReordeNodeInElement
+from torch_fea_mesh.processing.repair_mesh import ReorderNodeInElement
 
 pytestmark = pytest.mark.processing
 
@@ -58,6 +58,6 @@ def test_remove_unused_node_remaps_connectivity(triangle):
 def test_repair_face_orientation():
     mesh = TriangleMesh(torch.tensor([[0.,0.,0.],[1.,0.,0.],[1.,1.,0.],[0.,1.,0.]], dtype=torch.float64),
                         [[0,1,2],[0,3,2]])
-    ReordeNodeInElement(mesh, 0)
+    ReorderNodeInElement(mesh, 0)
     mesh.update_element_area_and_normal()
     torch.testing.assert_close(mesh.element_normal[0], mesh.element_normal[1])

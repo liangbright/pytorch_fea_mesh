@@ -38,6 +38,36 @@ def test_rigid_and_similarity_translation_convention():
         torch.testing.assert_close(transform(points), (points-transform.t)*scale)
 
 
+def test_same_angle_gives_same_R():
+    angle = torch.tensor([.3,-.5,.7], dtype=torch.float64)
+    R = RotationTransform3D.cal_R(angle)
+    c, s = torch.cos(angle), torch.sin(angle)
+    Rx = torch.tensor([[1,0,0],[0,c[0],-s[0]],[0,s[0],c[0]]], dtype=torch.float64)
+    Ry = torch.tensor([[c[1],0,s[1]],[0,1,0],[-s[1],0,c[1]]], dtype=torch.float64)
+    Rz = torch.tensor([[c[2],-s[2],0],[s[2],c[2],0],[0,0,1]], dtype=torch.float64)
+    torch.testing.assert_close(R, Rz@Ry@Rx)
+    points = torch.tensor([[3.,4.,5.],[-2.,.5,4.]], dtype=torch.float64)
+    t = torch.tensor([[1.,2.,3.]], dtype=torch.float64)
+    for cls, scale in [(RigidTransform3D, 1.), (SimilarityTransform3D, 2.)]:
+        assert torch.equal(cls.cal_R(angle), R)
+        transform = cls().double()
+        with torch.no_grad():
+            transform.angle.copy_(angle)
+            transform.t.copy_(t)
+            if cls is SimilarityTransform3D:
+                transform.s.fill_(scale)
+        torch.testing.assert_close(transform(points), scale*(points-t)@R.T)
+
+
+def test_dtype_input():
+    points = torch.tensor([[1.,2.,3.]], dtype=torch.float64)
+    for cls in (RotationTransform3D, RigidTransform3D, SimilarityTransform3D, RodrigueRotationTransform3D):
+        assert all(p.dtype == torch.get_default_dtype() for p in cls().parameters())
+        transform = cls(dtype=torch.float64)
+        assert all(p.dtype == torch.float64 for p in transform.parameters())
+        assert transform(points).dtype == torch.float64
+
+
 def test_rodrigues_static_rotation_about_origin():
     point = torch.tensor([[2.,1.,0.]], dtype=torch.float64)
     axis = torch.tensor([0.,0.,1.], dtype=torch.float64)

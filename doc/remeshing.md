@@ -18,6 +18,7 @@ result = isotropic_triangle_surface_remesh(
     target_edge_length_ratio_min=0.7,
     max_iter=10,
     flag_project_to_source_mesh=True,
+    flag_use_coverage_then_tangential=False,
 )
 ```
 
@@ -26,16 +27,43 @@ be positional; the remaining arguments are keyword-only.
 
 - Target edge length must be finite and at least `1e-5`. For smaller scales,
   rescale the geometry and target length together.
+- Every source triangle must have an area. A triangle with three nodes on a line, or with two
+  nodes at the same place, raises `ValueError: mesh has a degenerate triangle with no area`.
+  The remesher doesn't repair it, and the report is in the error's `diagnostics` attribute.
+  No area means at or below `scale**2 * 1e-14`, where `scale` is the larger of
+  `target_edge_length` and the diagonal of the bounding box of all nodes, including unused
+  ones. So a very large target or a node far away can reject a valid triangle. To find them:
+
+  ```python
+  from torch_fea_mesh.mesh.triangle_mesh import TriangleMesh
+
+  node = source_mesh.node.double()
+  scale = max((node.amax(0) - node.amin(0)).norm().item(), target_edge_length)
+  area, _ = TriangleMesh.cal_element_area_and_normal(node, source_mesh.element)
+  no_area = (area.ravel() <= scale**2 * 1e-14).nonzero().ravel()
+  ```
+
+  To fix the source, merge nodes at the same place and drop the triangles that then repeat a
+  node. For three different nodes on a line, flip the longest edge with the triangle next to it.
 - Feature-point indices refer to input nodes. Feature-edge indices refer to the
   original source edge-table order. A missing edge table is built on a private
   copy; a stale or inconsistent table is rejected.
 - Feature curves list consecutive input vertices connected by existing edges.
   Repeat the first vertex to close a curve. Feature edges and their endpoints
   remain protected from topology edits.
-- `flag_process_boundary=False` freezes boundary geometry. Disabling projection
+- `flag_process_boundary=False`, the default, freezes boundary geometry. Disabling projection
   avoids closest-point repositioning, but the implementation still requires VTK.
-- Working geometry uses independent CPU float64 arrays. Output restores source
-  coordinate dtype/device and connectivity device. This is not differentiable:
+- `flag_use_coverage_then_tangential` chooses how interior vertices are smoothed. By default
+  (`False`), a vertex moves to the plain average of its neighbors, which pulls curved surfaces and
+  thin parts in further with each iteration. With `True`, a vertex moves by coverage-based
+  smoothing, and in the last two iterations it slides within its tangent plane instead, unless it
+  is on a sharp crease or corner. With `max_iter=2`, tangential smoothing runs only in the last
+  iteration, and with `max_iter=1` it doesn't run. This reads the source mesh even when
+  `flag_project_to_source_mesh=False`.
+- Working geometry uses independent CPU float64 arrays. For a float32 source, each new position
+  is rounded to float32 when it is proposed, so the checks see what is written. Output restores
+  the source coordinate dtype, and its node and element are both on the source node's device,
+  whatever torch's default device is. This is not differentiable:
   an autograd graph is not retained through remeshing.
 - The input mesh and feature lists are unchanged. Source fields are not copied
   onto changed output topology; diagnostics are stored in
@@ -43,17 +71,48 @@ be positional; the remaining arguments are keyword-only.
 
 For problematic collapses, bounded local repair is attempted first. Failed
 attempts are deferred during the first `ceil(max_iter / 2)` iterations. Only
-later iterations may remove a certified enclosed region as a last resort;
-feature protection takes precedence. Geometry checks are bounded/sampled, not a
-general proof of global surface equivalence.
+later iterations may use nested replacement as a last resort: the nested
+triangles on one side of the short edge (u, v), bounded by a triangle of edges
+(u, v, w), become the one element (u, v, w), and the collapse is tried again as
+an ordinary one. Feature protection takes precedence.
+
+A replacement happens only if the whole nest is within `0.1 * target_edge_length`
+of (u, v, w). The surface keeps its Euler value, boundary loops and components,
+so a mesh cannot be erased. Nothing changes if any of these holds: the search for
+the nest goes over 256 faces, the other side is also within the limit, or the new
+element would pass through a face it shares no vertex with.
+
+The limit applies to each replacement, not across edits, and the merge of u and v
+has no distance check, like any other short edge. Other geometry checks are
+bounded/sampled, not a general proof of global surface equivalence. Records are in
+`result.mesh_data['remeshing_report']['nested_replacements']`.
+
+`result.mesh_data['remeshing_report']['failures']` says what the run couldn't do:
+
+- `error`: the error that stopped the run, or `None`.
+- `short_edges` and `long_edges`: how many edges are still outside the length limits.
+- `short_edge_reasons`: how many short edges ended with each reason, taken from the
+  last collapse tried on each edge. Two reasons separated by a comma name the repair
+  failure and then why replacement was refused. `not_tried` means no collapse was
+  tried on the edge, which is usually on a boundary. `link_obstruction` means the edge
+  formed during the last pass and is blocked, so repair and replacement weren't tried.
+  `nested_triangles_replaced` means the nest was replaced, but the collapse tried
+  after that failed.
+- `area_ratio`: the output area divided by the source area. The run doesn't judge
+  this number, so a value far from 1 is for you to check.
+
+If the run stops with an error once remeshing has started, the same report is in the
+error's `diagnostics` attribute. Errors in the arguments have no report.
 
 `max_iter=0` still permits the implementation's final interior-collapse pass; it
 does not mean a guaranteed identity operation. The final pass does not advance
-the enclosed-region-deletion phase.
+the nested-replacement phase. It also tries the short edges that form during it, with
+an ordinary collapse only, because a repair there can replace a short edge with another
+one forever.
 
-The regression tests cover phase scheduling, repair and deletion,
+The regression tests cover phase scheduling, repair and nested replacement,
 feature numbering/protection, frozen boundaries, source immutability, dtype,
-projection, dynamic adjacency, curved enclosures, and feature VTK exports:
+projection, dynamic adjacency, curved nests, and feature VTK exports:
 
 ```bash
 python -m pytest test/remeshing/ -v
@@ -64,7 +123,7 @@ See the [synthetic example](../example/remesh_surface.py) and the
 
 ## Template barycentric mapping
 
-Install `torch-fea-mesh[remeshing]` for SciPy. Add the `vtk` extra for VTK export.
+Install the `vtk` extra for VTK export.
 
 ```python
 from torch_fea_mesh.processing.template_barycentric_mapping_based_remesher import (

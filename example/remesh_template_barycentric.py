@@ -1,6 +1,6 @@
 """Map a quad template to a curved triangle patch; optionally fix a landmark.
 
-Requires the remeshing and vtk extras.
+Requires the vtk extra.
 """
 import argparse
 from pathlib import Path

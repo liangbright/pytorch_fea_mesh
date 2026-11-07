@@ -10,9 +10,9 @@ from torch import cos, sin
 from torch.linalg import matmul
 #%% y=R*x
 class RotationTransform3D(nn.Module):
-    def __init__(self):
+    def __init__(self, dtype=None):
         super().__init__()
-        self.angle=nn.Parameter(torch.zeros(3))
+        self.angle=nn.Parameter(torch.zeros(3, dtype=dtype))
     
     @staticmethod
     def cal_R(angle):

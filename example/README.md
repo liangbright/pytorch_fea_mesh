@@ -22,8 +22,7 @@ python example/remesh_template_barycentric.py
 python example/remesh_template_barycentric.py --landmark
 ```
 
-The remeshing examples require VTK; template barycentric mapping also needs the
-`remeshing` extra. Default output folders are resolved from the repository,
+The remeshing examples require VTK. Default output folders are resolved from the repository,
 independently of the working directory:
 
 - `data/example/generate_mesh_output/`

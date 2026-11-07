@@ -1,22 +1,25 @@
-"""Isotropic triangle remeshing using torch_fea_mesh, NumPy, PyTorch and VTK.
+"""Isotropic remeshing of triangle surfaces, adapted from the author's C++ code on GitHub.
 
-All mutable state belongs to a call. Source geometry and feature lists are never
-modified. Working coordinates are CPU float64; output restores the source dtype
-and device. Functions are grouped in execution order: input preparation, working
-topology, reference geometry, iteration stages, local edits, collapse repair,
-enclosure certification, and output validation.
+Each call works on its own copy of the mesh, so the source mesh and the feature lists
+are never changed. The work is done in double precision on the CPU, and the output goes
+back to the data type and device of the source. After the public function and its
+report, the functions are grouped by stage: input checks, protected features, the working
+topology, reference geometry, the iteration loop, local edits, collapsing and repair,
+nested-triangle replacement, flipping and smoothing, and output checks.
 
-The mesh library supplies containers, initial adjacency, geometry primitives,
-and I/O. This remesher owns dynamic adjacency updates because its edit ordering,
-stable vertex IDs, face-row swaps, and temporary repair patches are specific to
-this algorithm. The working ``topology`` dictionary is documented at its factory,
-_initialize_topology(). Mesh tensors share its active NumPy arrays; library
-adjacency fields are cleared rather than left stale during local edits.
+The mesh library provides the mesh classes, the first adjacency tables and the geometry
+calculations. This file keeps its own adjacency tables up to date, because they depend on
+how edits are ordered, how faces are renumbered and how repair works on temporary copies.
+_initialize_topology() describes the working topology, the connectivity and geometry tables
+used during a call. The mesh tensors share memory with its arrays, and the library's own
+adjacency tables are cleared during editing so that nothing reads an out-of-date copy.
 
-Problematic collapses try bounded geometry-preserving local repair first. Failed
-attempts are deferred for ceil(max_iter/2) iterations. Only in the remaining
-iterations may a verified enclosed region be erased. Features always take priority.
-See doc/remeshing.md for policies and geometric limitations.
+A short edge can be blocked from collapsing by a link obstruction, usually because its end
+points share extra neighbors. The remesher first tries a local repair that stays close to
+the original shape. If that fails, the edge waits through the first ceil(max_iter/2)
+iterations. In the remaining iterations, the nested triangles on that edge may be replaced
+by one element. Protected features always take priority. See doc/remeshing.md for the rules
+and the known limits.
 """
 
 from __future__ import annotations
@@ -39,7 +42,7 @@ from ..mesh.mesh import Mesh
 def isotropic_triangle_surface_remesh(
     source_mesh: TriangleMesh,
     target_edge_length: float,
-    flag_process_boundary: bool = True,
+    flag_process_boundary: bool = False,
     *,
     feature_point_index_list: list[int] | None = None,
     feature_edge_index_list: list[int] | None = None,
@@ -48,20 +51,54 @@ def isotropic_triangle_surface_remesh(
     target_edge_length_ratio_min: float = 0.7,
     max_iter: int = 10,
     flag_project_to_source_mesh: bool = True,
+    flag_use_coverage_then_tangential: bool = False,
 ) -> TriangleMesh:
-    """Return a fresh remesh, honoring all ten C++ input fields.
+    """Return a new remeshed surface. The source mesh is not changed.
 
-    target_edge_length must be finite and at least 1e-5. For smaller targets,
-    rescale source_mesh.node and target_edge_length by the same factor.
+    The first ten arguments match the ten inputs of the original C++ remesher, and
+    flag_use_coverage_then_tangential is an addition. The first three can be passed by
+    position. Arguments that aren't valid raise TypeError or ValueError. So does a source
+    triangle with no area, see doc/remeshing.md.
 
-    Feature edges use ORIGINAL source edge-table numbering. Curves specify
-    consecutive source point pairs; repeat the first point to close a curve.
-    False boundary processing freezes boundary geometry. False projection skips
-    closest-point repositioning, including in repairs. As in C++, projection is
-    applied to relaxation, not ordinary split/collapse placement.
+    target_edge_length must be finite and at least 1e-5. For a smaller target, scale
+    source_mesh.node and target_edge_length by the same factor. An edge counts as short at
+    or below target_edge_length * target_edge_length_ratio_min, and as long above
+    target_edge_length * target_edge_length_ratio_max.
 
-    The original three positional arguments remain supported. Diagnostics are
-    returned in output.mesh_data['remeshing_report']; no source fields are copied.
+    max_iter is the number of iterations. One last collapse pass runs after them, even when
+    max_iter is 0.
+
+    flag_process_boundary is False by default, which keeps every boundary point and
+    edge exactly where it is. Set it to True to split, collapse and smooth the boundary.
+
+    Feature points stay where they are. Feature edges stay in the mesh, and their end points
+    stay where they are. Feature edges are numbered as in the edge table of the source mesh.
+    A feature curve lists source points in order, with an existing edge between each
+    consecutive pair, and those edges become feature edges. Repeat the first point to close
+    the curve.
+
+    flag_project_to_source_mesh moves smoothed vertices back onto the source surface, or
+    onto their original boundary curve. As in the C++ remesher, splits and collapses
+    don't project, and neither does repair.
+
+    flag_use_coverage_then_tangential chooses how interior vertices are smoothed. By default
+    (False), a vertex moves to the plain average of its neighbors, which pulls curved surfaces
+    and thin parts in further with each iteration. With True, a vertex moves to the centre of the
+    part of the source closest to it (coverage-based smoothing, also called Lloyd relaxation),
+    and in the last two iterations it slides within its tangent plane instead (tangential
+    smoothing), unless it is on a sharp crease or corner. The first iteration always uses
+    coverage-based smoothing, so with max_iter=2 tangential smoothing runs only in the last
+    iteration, and with max_iter=1 it doesn't run. It reads the source mesh even when
+    flag_project_to_source_mesh is False.
+
+    Diagnostics are in output.mesh_data['remeshing_report']. Its failures entry says what
+    the run couldn't do: error is the error that stopped the run, or None. short_edges and
+    long_edges count the edges still outside the length limits, and short_edge_reasons counts
+    the short edges by why the last collapse tried on each one failed. area_ratio is the
+    output area divided by the source area. If the run stops with an error once remeshing has
+    started, the same report is in the error's diagnostics attribute.
+
+    Fields of the source mesh are not copied to the output.
     """
     _validate_input(
         source_mesh,
@@ -74,6 +111,7 @@ def isotropic_triangle_surface_remesh(
         target_edge_length_ratio_min=target_edge_length_ratio_min,
         max_iter=max_iter,
         flag_project_to_source_mesh=flag_project_to_source_mesh,
+        flag_use_coverage_then_tangential=flag_use_coverage_then_tangential,
     )
     started = time.perf_counter()
     mesh = _copy_source_mesh(source_mesh)
@@ -84,9 +122,10 @@ def isotropic_triangle_surface_remesh(
         max_iter,
         flag_process_boundary,
         flag_project_to_source_mesh,
+        flag_use_coverage_then_tangential,
     )
     tolerances = _compute_tolerance(mesh, target_edge_length)
-    topology = _initialize_topology(mesh)
+    topology = _initialize_topology(mesh, round_positions=source_mesh.node.dtype == torch.float32)
     features = _initialize_feature_constraint(
         source_mesh,
         mesh,
@@ -95,41 +134,79 @@ def isotropic_triangle_surface_remesh(
         feature_edge_index_list,
         feature_curve_list,
     )
-    reference, boundary = _prepare_initial_mesh(mesh, topology, features, parameters, tolerances)
-    collapse_history = {}
-    _run_remeshing_iteration(
-        mesh, topology, features, boundary, reference, parameters, tolerances, collapse_history
+    source_area = sum(topology['areas'].values())
+    try:
+        reference, boundary = _prepare_initial_mesh(mesh, topology, parameters, tolerances)
+        _run_remeshing_iteration(
+            mesh, topology, features, boundary, reference, parameters, tolerances
+        )
+        output = _finalize_output(
+            mesh, topology, source_mesh, reference, parameters, features, boundary, tolerances
+        )
+    except Exception as error:
+        error.diagnostics = _build_report(
+            source_mesh, topology, parameters, source_area, started, error=error
+        )
+        raise
+    output.mesh_data['remeshing_report'] = _build_report(
+        source_mesh, topology, parameters, source_area, started, output=output
     )
-    output = _finalize_output(
-        mesh, topology, source_mesh, reference, parameters, features, boundary, tolerances
-    )
-    output.mesh_data['remeshing_report'] = {
+    return output
+
+
+def _build_report(
+    source_mesh, topology, parameters, source_area, started, *, output=None, error=None
+):
+    """Return the report of a run. A run stopped by an error has no output sizes."""
+    return {
         'parameters': dict(parameters),
         'operations': dict(topology['counts']),
-        'collapse_outcomes': dict(topology['outcomes']),
+        'failures': _report_failures(topology, parameters, source_area, error),
         'iterations': topology['iterations'],
-        'region_deletions': topology['deletions'],
+        'nested_replacements': topology['replacements'],
         'input_nodes': len(source_mesh.node),
         'input_faces': len(source_mesh.element),
-        'output_nodes': len(output.node),
-        'output_faces': len(output.element),
+        'output_nodes': None if output is None else len(output.node),
+        'output_faces': None if output is None else len(output.element),
         'elapsed_seconds': time.perf_counter() - started,
     }
-    return output
+
+
+def _report_failures(topology, parameters, source_area, error):
+    """Summarize what the run couldn't do. See the public function for the entries.
+
+    A short edge that no collapse tried counts as not_tried. It's usually on a boundary.
+    """
+    lengths = topology['lengths'].values()
+    short_edges = [
+        edge
+        for edge, length in topology['lengths'].items()
+        if length <= parameters['min_edge_length']
+    ]
+    return dict(
+        error=None if error is None else f'{type(error).__name__}: {error}',
+        short_edges=len(short_edges),
+        short_edge_reasons=dict(
+            Counter(topology['collapse_failures'].get(edge, 'not_tried') for edge in short_edges)
+        ),
+        long_edges=sum(length > parameters['max_edge_length'] for length in lengths),
+        area_ratio=sum(topology['areas'].values()) / source_area if source_area else None,
+    )
 
 
 # Input validation and per-call configuration
 
 
 def _as_numpy(value):
-    """Expose a CPU NumPy array; callers must copy it before independent mutation."""
+    """Return a CPU NumPy array. It may share memory with the input, so copy it before editing."""
     return value.detach().cpu().numpy() if torch.is_tensor(value) else np.asarray(value)
 
 
 def _new_mesh(node, element):
-    """Construct a working mesh, preserving shaped arrays for empty connectivity."""
-    node = torch.as_tensor(node, dtype=torch.float64).reshape(-1, 3)
-    element = torch.as_tensor(element, dtype=torch.int64).reshape(-1, 3)
+    """Build a working mesh. An empty mesh still gets arrays of the right shape."""
+    device = node.device if torch.is_tensor(node) else 'cpu'
+    node = torch.as_tensor(node, dtype=torch.float64, device=device).reshape(-1, 3)
+    element = torch.as_tensor(element, dtype=torch.int64, device=device).reshape(-1, 3)
     if len(element):
         return TriangleMesh(node, element)
     mesh = TriangleMesh()
@@ -138,27 +215,26 @@ def _new_mesh(node, element):
 
 
 def _edge(a, b):
-    """Return the canonical endpoint pair used as a stable undirected edge key."""
+    """Return the two end points in sorted order, which is how edges are identified here."""
     return (int(a), int(b)) if a < b else (int(b), int(a))
 
 
 def _face_edge(face):
-    """Return the three canonical edges of an oriented triangle."""
+    """Return the three edges of a triangle, each with its end points sorted."""
     a, b, c = face
     return (_edge(a, b), _edge(b, c), _edge(c, a))
 
 
 def _index_list(values, size, name):
-    """Validate a one-dimensional source-index sequence while preserving its order."""
+    """Check a one-dimensional list of source indices and return it as ints, in the same order.
+
+    None gives an empty list.
+    """
     if values is None:
         return []
     if torch.is_tensor(values):
-        if values.ndim != 1 or values.dtype not in (
-            torch.int8,
-            torch.int16,
-            torch.int32,
-            torch.int64,
-            torch.uint8,
+        if values.ndim != 1 or (
+            values.dtype.is_floating_point or values.dtype.is_complex or values.dtype == torch.bool
         ):
             raise TypeError(f'{name} must contain integer indices')
         values = values.tolist()
@@ -177,7 +253,11 @@ def _index_list(values, size, name):
 
 
 def _source_edge(source_mesh):
-    """Read original edge numbering, building a private table only when absent."""
+    """Return the edges of the source mesh in their original numbering.
+
+    If the source has no edge table, build one on a private copy. If it has one, check
+    that it matches the faces.
+    """
     expected_edges = {
         _edge(a, b) for face in _as_numpy(source_mesh.element) for a, b in _face_edge(face)
     }
@@ -196,14 +276,14 @@ def _source_edge(source_mesh):
         raise ValueError('source edge table must be an integer E x 2 array')
     edges = [_edge(*edge) for edge in source_edge_array]
     if len(set(edges)) != len(edges) or set(edges) != expected_edges:
-        raise ValueError('source edge table is stale or inconsistent with its faces')
+        raise ValueError('source edge table does not match the faces')
     return edges
 
 
 def _validate_input(
     source_mesh,
     target_edge_length,
-    flag_process_boundary=True,
+    flag_process_boundary=False,
     *,
     feature_point_index_list=None,
     feature_edge_index_list=None,
@@ -212,10 +292,11 @@ def _validate_input(
     target_edge_length_ratio_min=0.7,
     max_iter=10,
     flag_project_to_source_mesh=True,
+    flag_use_coverage_then_tangential=False,
 ):
-    """Validate public arguments and source arrays without modifying the source."""
+    """Check the public arguments and the source arrays, without changing the source."""
     if not isinstance(source_mesh, TriangleMesh):
-        raise TypeError('source_mesh must be your mesh library TriangleMesh')
+        raise TypeError('source_mesh must be a TriangleMesh')
     if not torch.is_tensor(source_mesh.node) or source_mesh.node.dtype not in (
         torch.float32,
         torch.float64,
@@ -252,13 +333,15 @@ def _validate_input(
         math.isfinite(target_edge_length * r)
         for r in (target_edge_length_ratio_min, target_edge_length_ratio_max)
     ):
-        raise ValueError('edge-length thresholds overflow')
+        raise ValueError('edge length limits are too large to compute')
     if isinstance(max_iter, (bool, np.bool_)) or not isinstance(max_iter, Integral) or max_iter < 0:
         raise ValueError('max_iter must be a nonnegative integer')
     if not isinstance(flag_process_boundary, bool) or not isinstance(
         flag_project_to_source_mesh, bool
     ):
-        raise TypeError('boundary and projection flags must be bool')
+        raise TypeError('flag_process_boundary and flag_project_to_source_mesh must be bool')
+    if not isinstance(flag_use_coverage_then_tangential, bool):
+        raise TypeError('flag_use_coverage_then_tangential must be bool')
     _index_list(feature_point_index_list, len(positions), 'feature_point_index_list')
     if feature_edge_index_list is not None:
         _index_list(
@@ -275,9 +358,11 @@ def _validate_input(
 
 
 def _copy_source_mesh(source_mesh):
-    """Copy geometry/connectivity into independent CPU float64/int64 storage."""
+    """Copy the nodes and elements into separate CPU arrays, as float64 and int64."""
     node = source_mesh.make_node_copy('torch', dtype=torch.float64).detach().cpu().clone()
-    element = torch.as_tensor(source_mesh.make_element_copy('numpy'), dtype=torch.int64).clone()
+    element = torch.as_tensor(
+        source_mesh.make_element_copy('numpy'), dtype=torch.int64, device=node.device
+    ).clone()
     return _new_mesh(node, element)
 
 
@@ -288,8 +373,9 @@ def _make_parameter(
     max_iter,
     flag_process_boundary,
     flag_project_to_source_mesh,
+    flag_use_coverage_then_tangential=False,
 ):
-    """Normalize scalar inputs and derive edge thresholds and local repair budgets."""
+    """Collect the settings for one call, including the edge length limits and repair budgets."""
     return dict(
         target_edge_length=float(target_edge_length),
         target_edge_length_ratio_max=float(target_edge_length_ratio_max),
@@ -299,7 +385,7 @@ def _make_parameter(
         max_iter=int(max_iter),
         flag_process_boundary=flag_process_boundary,
         flag_project_to_source_mesh=flag_project_to_source_mesh,
-        early_iteration_count=(int(max_iter) + 1) // 2,
+        flag_use_coverage_then_tangential=flag_use_coverage_then_tangential,
         repair_rings=2,
         repair_max_faces=256,
         repair_max_attempts=8,
@@ -319,10 +405,10 @@ def _initialize_feature_constraint(
     feature_edge_index_list,
     feature_curve_list,
 ):
-    """Build protected point/edge sets and snapshots of fixed coordinates.
+    """Collect the protected points and edges, and record where the protected points are.
 
-    Explicit feature edges and curve edges also protect their endpoints. The
-    returned positions dictionary stores original coordinates by vertex ID.
+    The end points of feature edges and feature curves are protected too. The returned
+    positions dictionary gives the original coordinates of each protected vertex.
     """
     points = set(_index_list(feature_point_index_list, len(mesh.node), 'feature points'))
     edges = set()
@@ -342,7 +428,7 @@ def _initialize_feature_constraint(
 
 
 def _convert_feature_curve_to_edge(source_mesh, source_topology, feature_curve_list):
-    """Collect existing edges between consecutive source IDs in each curve."""
+    """Return the edges between consecutive points of each curve; raise if one doesn't exist."""
     edges = set()
     for curve in feature_curve_list or []:
         ids = _index_list(curve, len(source_mesh.node), 'feature curve')
@@ -355,43 +441,57 @@ def _convert_feature_curve_to_edge(source_mesh, source_topology, feature_curve_l
 
 
 def _check_feature_constraint(mesh, topology, features, edit=None, *, old_to_new_vertex=None):
-    """Return (valid, reason) for fixed points and surviving protected edges.
+    """Return (valid, reason): whether protected points stay put and protected edges survive.
 
-    An edit is checked prospectively, without mutation. old_to_new_vertex is used
-    only when checking the compacted output against original protected IDs.
+    With an edit, this checks what the edit would do, without applying it. It looks only at
+    what the edit touches, so its cost doesn't grow with the number of protected items. Every
+    other protected item is known to be fine, because every committed edit passed this check.
+    The exception is a repair patch's absent_edges, see _extract_repair_patch, so those are
+    always looked at. old_to_new_vertex is used only when checking the renumbered output
+    against the original protected IDs.
     """
+    if edit:
+        protected_positions = features['positions']
+        for v, q in edit.get('positions', {}).items():
+            if v in protected_positions and not np.array_equal(q, protected_positions[v]):
+                return False, 'modified_feature_point'
+        if any(v in protected_positions for v in edit.get('retired', ())):
+            return False, 'modified_feature_point'
+        if features['edges']:
+            removed_edges = {
+                e for f in edit['remove_faces'] for e in _face_edge(topology['faces'][f])
+            }
+            touched_edges = [e for e in removed_edges if e in features['edges']]
+            for key in touched_edges + list(features.get('absent_edges', ())):
+                count = len(topology['edge_to_faces'].get(key, set()) - edit['remove_faces'])
+                count += sum(key in _face_edge(f) for f in edit['add_faces'])
+                if not count:
+                    return False, 'lost_feature_edge'
+        return True, 'ok'
     mapping = old_to_new_vertex
     for v, p in features['positions'].items():
         w = mapping.get(v, -1) if mapping is not None else v
         if w < 0 or w >= len(mesh.node):
             return False, 'lost_feature_point'
-        q = (
-            edit.get('positions', {}).get(w, topology['vertex_positions'][w])
-            if edit
-            else topology['vertex_positions'][w]
-        )
-        if not np.array_equal(q, p) or (edit and w in edit.get('retired', set())):
+        if not np.array_equal(topology['vertex_positions'][w], p):
             return False, 'modified_feature_point'
     for e in features['edges']:
         key = _edge(*(mapping.get(v, -1) for v in e)) if mapping is not None else e
-        incidence = topology['edge_to_faces'].get(key, set())
-        if edit:
-            count = len(incidence - edit['remove_faces'])
-            count += sum(key in _face_edge(f) for f in edit['add_faces'])
-        else:
-            count = len(incidence)
-        if not count:
+        if not topology['edge_to_faces'].get(key):
             return False, 'lost_feature_edge'
     return True, 'ok'
 
 
-def _deletion_phase_allowed(iteration_index, max_iter):
-    """Allow deletion only in the late half of actual, zero-based iterations."""
+def _replacement_phase_allowed(iteration_index, max_iter):
+    """Return whether this iteration, counted from zero, is in the late half.
+
+    Only those iterations, the last floor(max_iter / 2), may use nested replacement.
+    """
     return 0 <= iteration_index < max_iter and iteration_index >= (max_iter + 1) // 2
 
 
 def _compute_tolerance(source_mesh, target_edge_length):
-    """Derive geometric acceptance tolerances from source extent and target length."""
+    """Work out the geometric tolerances from the size of the source and the target length."""
     positions = _as_numpy(source_mesh.node)
     extent = (
         float(np.linalg.norm(np.ptp(positions, axis=0))) if len(positions) else target_edge_length
@@ -400,40 +500,42 @@ def _compute_tolerance(source_mesh, target_edge_length):
     return {
         'length': scale * 1e-12,
         'area': scale * scale * 1e-14,
-        'plane': scale * 1e-8,
-        'barycentric': 1e-9,
         'normal_dot': 1e-6,
     }
 
 
-# Working topology and algorithm-specific adjacency updates
+# Working topology and adjacency updates
 
 
-def _initialize_topology(mesh):
-    """Build the per-call working topology from the mesh library's adjacency.
+def _initialize_topology(mesh, round_positions=False):
+    """Build the working topology for one call from the mesh library's adjacency tables.
 
     Storage:
-        vertex_positions / faces: active N x 3 float64 / M x 3 int64 arrays.
-        vertex_buffer / face_buffer: backing arrays with spare capacity. Growing
-            a buffer requires refreshing the active view and mesh tensor views.
+        vertex_positions / faces: the active N x 3 float64 and M x 3 int64 arrays.
+        vertex_buffer / face_buffer: the arrays behind them, with spare room. After
+            growing a buffer, the active arrays and the mesh tensors must be refreshed.
+        round_positions: whether new positions are rounded to float32 when proposed, because
+            the source is float32. See round_position.
 
     Connectivity:
-        edge_to_faces: canonical (min_vertex, max_vertex) -> incident face IDs.
-        vertex_to_faces / vertex_neighbors: lists of sets indexed by vertex ID.
-        boundary_edges / boundary_neighbors: edges with exactly one incident
-            face and their vertex-neighbor sets.
-        face_keys: sorted vertex triples -> face IDs, for duplicate detection.
+        edge_to_faces: maps an edge (smaller vertex, larger vertex) to the IDs of its incident
+            faces, the faces that use it.
+        vertex_to_faces / vertex_neighbors: lists of sets, indexed by vertex ID.
+        boundary_edges / boundary_neighbors: the edges with exactly one face, and the
+            neighbors of each vertex along those edges.
+        face_keys: maps sorted vertex triples to face IDs, to detect duplicate faces.
 
     Geometry and bookkeeping:
-        lengths: edge-keyed lengths; areas / normals / angles: face-ID-keyed
-            measurements. dirty_edges / dirty_faces identify values to refresh.
-        revision: incremented after each committed edit; proposals must match it.
-        counts / outcomes / iterations: operation, rejection, and timing records.
-        ledger / deletions: accepted repair and enclosed-region deletion records.
+        lengths: edge lengths by edge. areas / normals / angles: values by face ID.
+        dirty_edges / dirty_faces: the values that need recalculating.
+        revision: goes up with each applied edit. A proposed edit must match it.
+        counts / iterations: records of operations and timing.
+        collapse_failures: maps an edge to the reason from the last collapse tried on it.
+        replacements: records of accepted nested replacements.
 
-    Vertex IDs remain stable until final compaction. Face IDs can change when a
-    deleted row is replaced by the last row. All incidences and measurements for
-    that moved face must be remapped before another edit is considered.
+    Vertex IDs stay the same until the output is renumbered. Face IDs can change, because
+    a removed row is filled with the last row. Everything that refers to the moved face
+    must be updated before another edit is considered.
     """
     vertex_count, face_count = len(mesh.node), len(mesh.element)
     if face_count:
@@ -475,10 +577,10 @@ def _initialize_topology(mesh):
         dirty_faces=set(range(face_count)),
         dirty_edges=set(edge_to_faces),
         revision=0,
-        ledger=[],
-        deletions=[],
+        round_positions=round_positions,
+        replacements=[],
         counts=Counter(),
-        outcomes=Counter(),
+        collapse_failures={},
         iterations=[],
     )
     for edge, incident_faces in edge_to_faces.items():
@@ -488,19 +590,19 @@ def _initialize_topology(mesh):
             topology['boundary_neighbors'][a].add(b)
             topology['boundary_neighbors'][b].add(a)
     _set_mesh_view(mesh, topology)
-    mesh.clear_adj_info()  # Never expose stale dense library edge rows.
+    mesh.clear_adj_info()  # Drop the library's edge table so nothing reads an old copy.
     _refresh_geometry(mesh, topology, full=True)
     return topology
 
 
 def _set_mesh_view(mesh, topology):
-    """Refresh mesh tensors sharing the active topology arrays, without copying."""
+    """Point the mesh tensors at the active arrays, without copying."""
     mesh.node = torch.from_numpy(topology['vertex_positions'])
     mesh.element = torch.from_numpy(topology['faces'])
 
 
 def _attach_face(topology, face_id, face, remove=False):
-    """Attach or detach a face's incidences; mark its edge geometry as dirty."""
+    """Add a face to the adjacency tables, or remove it, and mark its edges for recalculation."""
     for vertex_id in face:
         if remove:
             topology['vertex_to_faces'][vertex_id].discard(face_id)
@@ -527,12 +629,12 @@ def _attach_face(topology, face_id, face, remove=False):
 
 
 def _update_adjacency_after_edit(mesh, topology, changes):
-    """Apply face removals/additions and repair only affected adjacency entries.
+    """Remove and add faces, updating only the adjacency entries they affect.
 
-    Remove in descending ID order so each requested ID still names its original
-    face. Fill each hole with the last active face, updating all references to its
-    former row. Append replacement faces, then refresh affected boundary links.
-    Geometry is refreshed by _commit_edit() after this function returns.
+    Faces are removed from the highest ID down, so each requested ID still refers to the
+    face it named. Each gap is filled with the last active face, and everything that
+    referred to that face is updated. New faces go at the end, then the boundary tables
+    are refreshed. _commit_edit() recalculates the geometry after this returns.
     """
     face_count = len(topology['faces'])
     for face_id in sorted(changes['remove_faces'], reverse=True):
@@ -579,14 +681,14 @@ def _update_adjacency_after_edit(mesh, topology, changes):
 
 
 def _refresh_geometry(mesh, topology, *, full=False):
-    """Reuse library geometry primitives on only dirty gathered faces and edges."""
+    """Recalculate geometry for faces and edges marked as changed, or for all of them if full."""
     face_ids = sorted(range(len(topology['faces'])) if full else topology['dirty_faces'])
     if face_ids:
         connectivity = torch.from_numpy(topology['faces'][face_ids])
         areas, normals = TriangleMesh.cal_element_area_and_normal(mesh.node, connectivity)
         angles = TriangleMesh.cal_element_corner_angle(mesh.node, connectivity)
-        # Library normalization may clamp small denominators. The orientation
-        # tests below require unit directions for every nonzero normal.
+        # The library may limit small denominators when it normalizes, but the orientation
+        # checks need a unit normal for every nonzero normal.
         normal_array = normals.numpy()
         normal_lengths = np.linalg.norm(normal_array, axis=1, keepdims=True)
         normal_array = np.divide(
@@ -601,7 +703,8 @@ def _refresh_geometry(mesh, topology, *, full=False):
     edges = sorted(topology['edge_to_faces'] if full else topology['dirty_edges'])
     active_edges = [edge for edge in edges if edge in topology['edge_to_faces']]
     if active_edges:
-        lengths = Mesh.cal_edge_length(mesh.node, torch.tensor(active_edges)).numpy().ravel()
+        edge_table = torch.tensor(active_edges, device=mesh.node.device)
+        lengths = Mesh.cal_edge_length(mesh.node, edge_table).numpy().ravel()
         topology['lengths'].update(zip(active_edges, map(float, lengths)))
     for edge in edges:
         if edge not in topology['edge_to_faces']:
@@ -611,7 +714,7 @@ def _refresh_geometry(mesh, topology, *, full=False):
 
 
 def _check_adjacency_consistency(mesh, topology):
-    """Compare local adjacency and measurements against an independent rebuild."""
+    """Raise an error if the adjacency tables, edge lengths or face areas differ from a rebuild."""
     other = _copy_source_mesh(mesh)
     rebuilt = _initialize_topology(other)
     for name in (
@@ -623,58 +726,61 @@ def _check_adjacency_consistency(mesh, topology):
         'face_keys',
     ):
         if topology[name] != rebuilt[name]:
-            raise RuntimeError(f'incremental {name} differs from independent library rebuild')
+            raise RuntimeError(f'{name} differs from a fresh rebuild')
     if set(topology['lengths']) != set(rebuilt['lengths']):
-        raise RuntimeError('stale edge measurements')
+        raise RuntimeError('the set of measured edges differs from a fresh rebuild')
     for e, length in rebuilt['lengths'].items():
         if not np.isclose(length, topology['lengths'][e], rtol=1e-12, atol=1e-12):
-            raise RuntimeError('stale edge length')
+            raise RuntimeError('an edge length differs from a fresh rebuild')
     for f, area in rebuilt['areas'].items():
         if not np.isclose(area, topology['areas'][f], rtol=1e-12, atol=1e-12):
-            raise RuntimeError('stale face geometry')
+            raise RuntimeError('a face area differs from a fresh rebuild')
 
 
-def _validate_mesh(mesh, topology, tolerances, *, strict_manifold=False, allow_empty=False):
-    """Reject invalid retained geometry and return a topology-size summary."""
+def _validate_mesh(topology, tolerances, *, strict_manifold=False, allow_empty=False):
+    """Raise an error if the mesh is invalid; otherwise return a summary with its face count.
+
+    strict_manifold also rejects nonmanifold edges, which have more than two faces.
+    allow_empty accepts a mesh with no faces.
+    """
     positions, faces = topology['vertex_positions'], topology['faces']
     if not len(faces) and not allow_empty:
         raise ValueError('empty mesh')
     if not np.isfinite(positions).all() or (
         len(faces) and (faces.min() < 0 or faces.max() >= len(positions))
     ):
-        raise ValueError('invalid geometry/connectivity')
+        raise ValueError('mesh has non-finite coordinates or invalid vertex indices')
     if len(topology['face_keys']) != len(faces):
         raise ValueError('duplicate triangle faces')
     if any(
         area <= tolerances['area'] or not math.isfinite(area) for area in topology['areas'].values()
     ):
-        raise ValueError('degenerate source or retained triangle')
+        raise ValueError('mesh has a degenerate triangle with no area')
     high_incidence_edge_count = sum(
         len(incident_faces) > 2 for incident_faces in topology['edge_to_faces'].values()
     )
     if strict_manifold and high_incidence_edge_count:
-        raise ValueError('nonmanifold edge incidence')
-    return dict(
-        nodes=len(positions),
-        faces=len(faces),
-        edges=len(topology['edge_to_faces']),
-        high_incidence_edges=high_incidence_edge_count,
-        boundary_edges=len(topology['boundary_edges']),
-    )
+        raise ValueError('nonmanifold edge incidence: an edge has more than two faces')
+    return dict(faces=len(faces))
 
 
 # Original geometry, boundary constraints, and projection
 
 
-def _prepare_initial_mesh(mesh, topology, features, parameters, tolerances):
-    """Validate the working mesh and snapshot its projection and boundary reference."""
-    summary = _validate_mesh(mesh, topology, tolerances, allow_empty=True)
-    reference = _build_reference(mesh, topology, summary, features, parameters)
-    return reference, _initialize_boundary_constraint(reference, features, parameters)
+def _prepare_initial_mesh(mesh, topology, parameters, tolerances):
+    """Check the working mesh, record its geometry, and set up the boundary constraints."""
+    summary = _validate_mesh(topology, tolerances, allow_empty=True)
+    reference = _build_reference(mesh, topology, summary)
+    return reference, _initialize_boundary_constraint(reference, parameters)
 
 
-def _trace_boundary_component(mesh, topology, *, allow_unresolved=False):
-    """Trace current endpoint maps; library traversal would rebuild stale edge rows."""
+def _trace_boundary_component(topology, *, allow_unresolved=False):
+    """Group the boundary edges into connected components, using this file's own tables.
+
+    A component is one separate piece. Each is (vertices, edges, regular), where regular means
+    every vertex has exactly two boundary neighbors. An irregular component raises an error
+    unless allow_unresolved is set.
+    """
     remaining = set(topology['boundary_edges'])
     components = []
     while remaining:
@@ -691,19 +797,20 @@ def _trace_boundary_component(mesh, topology, *, allow_unresolved=False):
         remaining.difference_update(edges)
         regular = all(len(topology['boundary_neighbors'][v]) == 2 for v in nodes)
         if not regular and not allow_unresolved:
-            raise ValueError('unresolved branched/open boundary')
+            raise ValueError('a boundary vertex does not have exactly two boundary neighbors')
         components.append((tuple(sorted(nodes)), tuple(sorted(edges)), regular))
     return components
 
 
-def _build_reference(mesh, topology, topology_summary, features, parameters):
-    """Snapshot original geometry and boundary components for this remeshing call.
+def _build_reference(mesh, topology, topology_summary):
+    """Record the original geometry and boundary components for this call.
 
-    Surface/boundary VTK locators are built lazily. Boundary labels map vertex IDs
-    to original component IDs; boundary_positions retains original coordinates.
+    The VTK locators for the surface and the boundary are built when first needed. labels
+    maps each boundary vertex to its original boundary component, and boundary_positions keeps
+    the original coordinates of those vertices.
     """
     original = _copy_source_mesh(mesh)
-    components = _trace_boundary_component(mesh, topology, allow_unresolved=True)
+    components = _trace_boundary_component(topology, allow_unresolved=True)
     labels = {v: k for k, (nodes, _, _) in enumerate(components) for v in nodes}
     return dict(
         mesh=original,
@@ -718,9 +825,12 @@ def _build_reference(mesh, topology, topology_summary, features, parameters):
 
 
 def _build_cell_locator(reference_mesh):
-    """The library wrapper rebuilds a locator per call; retain one here instead."""
+    """Build a VTK cell locator to reuse for many closest-point queries.
+
+    Returns the locator together with the dataset it searches.
+    """
     if not len(reference_mesh.element):
-        raise ValueError('cannot construct a locator on empty geometry')
+        raise ValueError('cannot build a locator for empty geometry')
     data = reference_mesh.convert_to_vtk()
     locator = vtk.vtkStaticCellLocator()
     locator.SetDataSet(data)
@@ -728,11 +838,12 @@ def _build_cell_locator(reference_mesh):
     return {'data': data, 'locator': locator}
 
 
-def _initialize_boundary_constraint(reference, features, parameters):
-    """Track original boundary labels and optional fixed-point/edge constraints.
+def _initialize_boundary_constraint(reference, parameters):
+    """Set up the boundary labels and, when boundary processing is off, the frozen boundary.
 
-    labels can grow when boundary edges are split. frozen uses the same points,
-    edges, and positions schema as feature constraints.
+    labels gains a vertex when a boundary edge is split, and loses one when a vertex is
+    removed. frozen has the same points, edges and positions entries as the feature
+    constraints, and is empty when boundary processing is on.
     """
     frozen = not parameters['flag_process_boundary']
     return dict(
@@ -747,7 +858,7 @@ def _initialize_boundary_constraint(reference, features, parameters):
 
 
 def _closest_point(point, locator):
-    """Return the closest reference point and Euclidean distance from a VTK query."""
+    """Return the closest point on the reference geometry and the distance to it."""
     result = [0.0, 0.0, 0.0]
     cell_id, subcell_id, squared_distance = vtk.reference(0), vtk.reference(0), vtk.reference(0.0)
     locator['locator'].FindClosestPoint(
@@ -759,7 +870,10 @@ def _closest_point(point, locator):
 
 
 def _project_point(point, reference, parameters, *, boundary_component=None):
-    """Project onto the source surface or one original boundary component, if enabled."""
+    """Return the closest point on the source surface or on one original boundary component.
+
+    With projection off, return a copy of the point.
+    """
     if not parameters['flag_project_to_source_mesh']:
         return np.asarray(point, dtype=float).copy()
     if boundary_component is None:
@@ -783,13 +897,18 @@ def _project_point(point, reference, parameters, *, boundary_component=None):
 # Iteration scheduling
 
 
-def _run_remeshing_iteration(
-    mesh, topology, features, boundary, reference, parameters, tolerances, collapse_history
-):
-    """Run stages in the prescribed order, then the final interior collapse pass.
+def _run_remeshing_iteration(mesh, topology, features, boundary, reference, parameters, tolerances):
+    """Run max_iter iterations, then one last collapse pass over the interior.
 
-    Keep deferred problematic edges alive through the early half, even if an
-    iteration accepts no edits. The final pass cannot advance the deletion phase.
+    Each iteration processes the boundary (if enabled), flips edges to even out valence (the
+    number of edges at each vertex), splits long edges, collapses short edges, flips edges to
+    reduce large angles, and smooths interior vertices. All iterations run even if one changes
+    nothing, so edges waiting for the late half get their turn. The loop only stops early if
+    no faces are left.
+
+    The last pass uses the index of the last iteration, so it can't start the late half
+    early. It also tries the short edges that form during it, because nothing runs after it
+    to pick them up. Those edges only get an ordinary collapse.
     """
     logger = logging.getLogger(__name__)
     for iteration_index in range(parameters['max_iter']):
@@ -804,35 +923,23 @@ def _run_remeshing_iteration(
             reference,
             parameters,
             tolerances,
-            collapse_history,
             iteration_index=iteration_index,
         )
-        _equalize_valence(mesh, topology, features, boundary, reference, parameters, tolerances)
+        _equalize_valence(mesh, topology, features, boundary, parameters, tolerances)
         _split_long_edge(
-            mesh,
-            topology,
-            features,
-            boundary,
-            reference,
-            parameters,
-            tolerances,
-            boundary_only=False,
+            mesh, topology, features, boundary, parameters, tolerances, boundary_only=False
         )
         _collapse_short_edge(
             mesh,
             topology,
             features,
             boundary,
-            reference,
             parameters,
             tolerances,
-            collapse_history,
             boundary_only=False,
             iteration_index=iteration_index,
         )
-        _improve_triangle_angle(
-            mesh, topology, features, boundary, reference, parameters, tolerances
-        )
+        _improve_triangle_angle(mesh, topology, features, boundary, parameters, tolerances)
         _relax_vertex(
             mesh,
             topology,
@@ -842,6 +949,8 @@ def _run_remeshing_iteration(
             parameters,
             tolerances,
             boundary_only=False,
+            use_coverage=parameters['flag_use_coverage_then_tangential']
+            and iteration_index < coverage_iteration_count(parameters['max_iter']),
         )
         iteration_report = dict(
             iteration=iteration_index + 1,
@@ -862,20 +971,18 @@ def _run_remeshing_iteration(
             iteration_report['seconds'],
             iteration_report['operations'],
         )
-        # Do not terminate on zero accepted edits while deferred edges await phase 2.
+        # Keep going even if nothing changed: deferred edges may still be replaced later.
     if len(mesh.element):
         _collapse_short_edge(
             mesh,
             topology,
             features,
             boundary,
-            reference,
             parameters,
             tolerances,
-            collapse_history,
             boundary_only=False,
             iteration_index=parameters['max_iter'] - 1,
-            is_final_pass=True,
+            include_new_edges=True,
         )
 
 
@@ -887,25 +994,20 @@ def _process_boundary(
     reference,
     parameters,
     tolerances,
-    collapse_history,
     *,
     iteration_index,
 ):
-    """Split, collapse, and relax current boundary edges/vertices when enabled."""
+    """Split, collapse and smooth along the boundary, if boundary processing is on."""
     if not parameters['flag_process_boundary']:
         return
-    _split_long_edge(
-        mesh, topology, features, boundary, reference, parameters, tolerances, boundary_only=True
-    )
+    _split_long_edge(mesh, topology, features, boundary, parameters, tolerances, boundary_only=True)
     _collapse_short_edge(
         mesh,
         topology,
         features,
         boundary,
-        reference,
         parameters,
         tolerances,
-        collapse_history,
         boundary_only=True,
         iteration_index=iteration_index,
     )
@@ -917,8 +1019,12 @@ def _process_boundary(
 # Local edit proposals
 
 
-def _collect_candidate_edge(mesh, topology, parameters, *, boundary_only, operation):
-    """Snapshot eligible edge keys in deterministic order; collapses try shortest first."""
+def _collect_candidate_edge(topology, parameters, *, boundary_only, operation):
+    """Return the edges an operation should try, in a repeatable order.
+
+    boundary_only chooses boundary edges or all the others. A split takes long edges, a
+    collapse takes short edges with the shortest first, and a flip takes edges with two faces.
+    """
     edges = []
     for edge, incident_faces in topology['edge_to_faces'].items():
         if (len(incident_faces) == 1) != boundary_only:
@@ -935,6 +1041,16 @@ def _collect_candidate_edge(mesh, topology, parameters, *, boundary_only, operat
     return sorted(edges)
 
 
+def round_position(topology, point):
+    """Return a new position as it will be written, so the checks see the final coordinates.
+
+    The working arrays are float64. For a float32 source, an edit that passes in float64 could
+    otherwise merge two nodes or lose a triangle's area when the output is rounded.
+    """
+    point = np.asarray(point, dtype=float)
+    return point.astype(np.float32).astype(float) if topology['round_positions'] else point
+
+
 def _proposal(
     topology,
     kind,
@@ -947,12 +1063,12 @@ def _proposal(
     retired=(),
     normal_refs=(),
 ):
-    """Create an edit record without changing topology or geometry.
+    """Create a record of an edit, without changing the mesh.
 
-    remove_faces names current rows; add_faces contains replacement vertex triples.
-    positions changes existing vertices; new_points appends vertices in order.
-    retired vertices must lose all references. normal_refs constrains replacement
-    orientation. revision binds the proposal to the topology that produced it.
+    remove_faces lists current face IDs, and add_faces lists new triangles as vertex
+    triples. positions gives new coordinates for existing vertices, and new_points adds
+    vertices in order. retired vertices must end up with no faces. normal_refs are the
+    normals the new faces must agree with. revision ties the edit to the current mesh.
     """
     return dict(
         kind=kind,
@@ -960,15 +1076,22 @@ def _proposal(
         edge=edge,
         remove_faces=set(remove),
         add_faces=[tuple(map(int, f)) for f in add],
-        positions={} if positions is None else positions,
-        new_points=[np.asarray(p, dtype=float).copy() for p in new_points],
+        positions={}
+        if positions is None
+        else {v: round_position(topology, p) for v, p in positions.items()},
+        new_points=[round_position(topology, p).copy() for p in new_points],
         retired=set(retired),
         normal_refs=list(normal_refs),
     )
 
 
-def _propose_edge_split(mesh, topology, edge, features, boundary, reference, parameters):
-    """Propose midpoint subdivision of every incident triangle, preserving orientation."""
+def _propose_edge_split(topology, edge, features, boundary):
+    """Propose midpoint subdivision: a new vertex at the middle of the edge splits its faces.
+
+    Each incident face becomes two. Returns None if the edge no longer exists, is a feature
+    edge or is on a frozen boundary. On a boundary edge, the new vertex joins the boundary
+    component that both end points belong to.
+    """
     if (
         edge not in topology['edge_to_faces']
         or edge in features['edges']
@@ -1008,16 +1131,13 @@ def _propose_edge_split(mesh, topology, edge, features, boundary, reference, par
     return edit
 
 
-def _split_long_edge(
-    mesh, topology, features, boundary, reference, parameters, tolerances, *, boundary_only
-):
-    """Commit valid splits and revisit long child segments in the same pass."""
+def _split_long_edge(mesh, topology, features, boundary, parameters, tolerances, *, boundary_only):
+    """Split long edges that pass validation, and recheck the two halves in the same pass."""
     candidates = deque(
         _collect_candidate_edge(
-            mesh, topology, parameters, boundary_only=boundary_only, operation='split'
+            topology, parameters, boundary_only=boundary_only, operation='split'
         )
     )
-    accepted_count = 0
     while candidates:
         edge = candidates.popleft()
         if (
@@ -1027,31 +1147,27 @@ def _split_long_edge(
             continue
         if (edge in topology['boundary_edges']) != boundary_only:
             continue
-        edit = _propose_edge_split(mesh, topology, edge, features, boundary, reference, parameters)
+        edit = _propose_edge_split(topology, edge, features, boundary)
         if edit is None:
             continue
-        valid, _ = _validate_edit(
-            mesh, topology, edit, features, boundary, reference, parameters, tolerances
-        )
+        valid, _ = _validate_edit(mesh, topology, edit, features, boundary, parameters, tolerances)
         if valid:
             new_vertex_id = len(mesh.node)
-            _commit_edit(mesh, topology, edit, features, boundary)
-            accepted_count += 1
-            for v in edge:  # Source repeats child segments, not every new spoke.
+            _commit_edit(mesh, topology, edit, boundary)
+            for v in edge:  # Recheck the two halves, not the new edges to the opposite vertices.
                 child_edge = _edge(v, new_vertex_id)
                 if topology['lengths'][child_edge] > parameters['max_edge_length']:
                     candidates.append(child_edge)
-    return accepted_count
 
 
-def _plan_collapse_face(mesh, topology, edge, survivor_vertex_id):
-    """Identify disappearing faces and rewire the other endpoint faces to the survivor."""
+def _plan_collapse_face(topology, edge, survivor_vertex_id):
+    """Find the faces that disappear, and rewrite the other faces at both ends for the survivor."""
     u, v = edge
     removed_vertex_id = v if survivor_vertex_id == u else u
     affected_faces = topology['vertex_to_faces'][u] | topology['vertex_to_faces'][v]
     collapsed_faces = topology['vertex_to_faces'][u] & topology['vertex_to_faces'][v]
     if collapsed_faces != topology['edge_to_faces'].get(edge, set()):
-        raise RuntimeError('edge and endpoint face incidences disagree')
+        raise RuntimeError('the faces of an edge differ from the faces shared by its end points')
     replacement_faces, original_face_ids = [], []
     for face_id in sorted(affected_faces - collapsed_faces):
         replacement_faces.append(
@@ -1063,14 +1179,18 @@ def _plan_collapse_face(mesh, topology, edge, survivor_vertex_id):
         original_face_ids.append(face_id)
     return dict(
         affected_face_ids=affected_faces,
-        collapsed_face_ids=collapsed_faces,
         replacement_faces=replacement_faces,
         original_face_ids=original_face_ids,
     )
 
 
-def _propose_edge_collapse(mesh, topology, edge, features, boundary, reference, parameters):
-    """Propose midpoint/endpoint placements in priority order, respecting fixed vertices."""
+def _propose_edge_collapse(topology, edge, features, boundary):
+    """Propose collapses in order of preference: to the midpoint, then to either end point.
+
+    A protected end point stays where it is and survives. If both are protected, or the edge
+    itself is protected or gone, there is no proposal. For an interior edge, an end point on
+    the boundary counts as protected.
+    """
     if (
         edge not in topology['edge_to_faces']
         or edge in features['edges']
@@ -1078,14 +1198,22 @@ def _propose_edge_collapse(mesh, topology, edge, features, boundary, reference, 
     ):
         return []
     u, v = edge
-    protected = set(features['points']) | set(boundary['frozen']['points'])
-    if edge not in topology['boundary_edges']:
-        protected.update(w for w in edge if topology['boundary_neighbors'][w])
-    if u in protected and v in protected:
+    interior_edge = edge not in topology['boundary_edges']
+
+    def is_protected(w):
+        # Look up only the two end points: copying the protected sets would visit all of them.
+        return (
+            w in features['points']
+            or w in boundary['frozen']['points']
+            or (interior_edge and bool(topology['boundary_neighbors'][w]))
+        )
+
+    u_protected, v_protected = is_protected(u), is_protected(v)
+    if u_protected and v_protected:
         return []
-    if u in protected:
+    if u_protected:
         placements = [(u, topology['vertex_positions'][u])]
-    elif v in protected:
+    elif v_protected:
         placements = [(v, topology['vertex_positions'][v])]
     else:
         placements = [
@@ -1095,7 +1223,7 @@ def _propose_edge_collapse(mesh, topology, edge, features, boundary, reference, 
         ]
     result = []
     for survivor, position in placements:
-        plan = _plan_collapse_face(mesh, topology, edge, survivor)
+        plan = _plan_collapse_face(topology, edge, survivor)
         edit = _proposal(
             topology,
             'collapse',
@@ -1111,17 +1239,21 @@ def _propose_edge_collapse(mesh, topology, edge, features, boundary, reference, 
     return result
 
 
-def _passes_collapse_length_check(mesh, topology, edit, parameters, *, boundary_only):
-    """Prevent retained neighboring edges from newly crossing the length thresholds."""
+def _passes_collapse_length_check(topology, edit, parameters, *, boundary_only):
+    """Return False if a kept neighboring edge would newly become too short or too long.
+
+    Also return False if the edge no longer exists or is no longer short. For a boundary
+    collapse, only neighbors on the boundary are checked.
+    """
     edge = edit['edge']
     if (
         edge not in topology['edge_to_faces']
         or topology['lengths'][edge] > parameters['min_edge_length']
     ):
         return False
-    survivor, retired_vertex_id = edit['survivor'], next(iter(edit['retired']))
+    survivor = edit['survivor']
     position = edit['positions'][survivor]
-    # Only retained connections matter for the explicit region-erasure extension.
+    # Only check neighbors that stay connected to the surviving vertex.
     retained_neighbors = {
         neighbor
         for f in edit['add_faces']
@@ -1147,8 +1279,13 @@ def _passes_collapse_length_check(mesh, topology, edit, parameters, *, boundary_
     return True
 
 
-def _propose_edge_flip(mesh, topology, edge, features):
-    """Propose the opposite diagonal of two coherently oriented incident triangles."""
+def _propose_edge_flip(topology, edge, features):
+    """Propose the other diagonal of the edge's two faces.
+
+    Returns None if the edge doesn't have exactly two faces, is a feature edge, has faces that
+    aren't coherently oriented (they must run along the edge in opposite directions), or if the
+    other diagonal is already an edge.
+    """
     incident_faces = topology['edge_to_faces'].get(edge, ())
     if len(incident_faces) != 2 or edge in features['edges']:
         return None
@@ -1183,10 +1320,8 @@ def _propose_edge_flip(mesh, topology, edge, features):
     )
 
 
-def _propose_vertex_move(
-    mesh, vertex_id, candidate_position, features, boundary, reference, parameters
-):
-    """Return an optionally projected candidate position, or None for a fixed vertex."""
+def _propose_vertex_move(vertex_id, candidate_position, features, boundary, reference, parameters):
+    """Return a vertex's new position, projected if enabled, or None if the vertex is fixed."""
     if vertex_id in features['points'] or vertex_id in boundary['frozen']['points']:
         return None
     point = np.asarray(candidate_position, dtype=float)
@@ -1198,7 +1333,7 @@ def _propose_vertex_move(
 
 
 def _candidate_point(topology, edit, faces):
-    """Gather proposed triangle coordinates, including moved and newly appended vertices."""
+    """Return triangle coordinates as they would be after an edit, with moved and new vertices."""
     result = np.empty((len(faces), 3, 3))
     existing_vertex_count = len(topology['vertex_positions'])
     for face_index, face in enumerate(faces):
@@ -1211,31 +1346,35 @@ def _candidate_point(topology, edit, faces):
     return result
 
 
-def _geometry(points):
-    """Compute areas, unit normals, and corner angles for an array of triangle coordinates."""
+def _geometry(points, with_angles=True):
+    """Return the areas, unit normals and corner angles of an array of triangles.
+
+    Without with_angles, the angles are None. Validation doesn't use them, and the triangles it
+    checks can have two corners at the same place, which makes the angle calculation print.
+    """
     if not len(points):
         return np.empty(0), np.empty((0, 3)), np.empty((0, 3))
     node = torch.from_numpy(np.asarray(points, dtype=float).reshape(-1, 3))
-    element = torch.arange(len(node)).reshape(-1, 3)
+    element = torch.arange(len(node), device=node.device).reshape(-1, 3)
     area, normals = TriangleMesh.cal_element_area_and_normal(node, element)
-    angles = TriangleMesh.cal_element_corner_angle(node, element)
+    angles = TriangleMesh.cal_element_corner_angle(node, element).numpy() if with_angles else None
     normal_array = normals.numpy()
     normal_lengths = np.linalg.norm(normal_array, axis=1, keepdims=True)
     normal_array = np.divide(
         normal_array, normal_lengths, out=np.zeros_like(normal_array), where=normal_lengths > 0
     )
-    return area.numpy().ravel(), normal_array, angles.numpy()
+    return area.numpy().ravel(), normal_array, angles
 
 
 # Edit validation and commit
 
 
-def _validate_edit(mesh, topology, edit, features, boundary, reference, parameters, tolerances):
-    """Validate an edit without mutation, returning (accepted, reason).
+def _validate_edit(mesh, topology, edit, features, boundary, parameters, tolerances):
+    """Check an edit without changing anything, and return (accepted, reason).
 
-    Check revision and protections first, then operation-specific permission,
-    candidate geometry, and finally changed incidences. The first rejection is
-    retained in diagnostics, so the order of these checks is significant.
+    The checks run in this order: revision and protections, rules for the kind of edit,
+    geometry, then edge connectivity. The first failure becomes the reported reason, so
+    the order matters.
     """
     if edit['revision'] != topology['revision']:
         return False, 'stale_edit'
@@ -1244,18 +1383,15 @@ def _validate_edit(mesh, topology, edit, features, boundary, reference, paramete
         if not valid:
             return valid, reason
     kind = edit['kind']
-    if kind == 'enclosed_region_collapse':
-        valid, reason = _validate_enclosed_region_collapse(
-            mesh, topology, edit, features, boundary, reference, parameters, tolerances
-        )
-        if not valid:
-            return valid, reason
+    if kind == 'nested_replacement' and not (
+        edit['repair_failure']
+        and _replacement_phase_allowed(edit['iteration_index'], parameters['max_iter'])
+    ):
+        return False, 'replacement_not_permitted'
     if kind == 'repair_collapse' and not edit.get('repair_validated'):
         return False, 'unvalidated_repair'
     if kind == 'collapse':
-        classification = _classify_collapse_neighborhood(
-            mesh, topology, edit['edge'], features, boundary
-        )
+        classification = _classify_collapse_neighborhood(topology, edit['edge'], features, boundary)
         if classification['problematic']:
             return False, 'link_obstruction'
         if not edit['add_faces']:
@@ -1267,7 +1403,12 @@ def _validate_edit(mesh, topology, edit, features, boundary, reference, paramete
 
 
 def _validate_edit_geometry(topology, edit, tolerances) -> tuple[bool, str]:
-    """Reject invalid positions, duplicate triangles, degeneracy, or inversion."""
+    """Check the triangles an edit would leave, and return (accepted, reason).
+
+    It rejects positions that aren't finite, invalid vertex numbers, duplicate triangles,
+    degenerate triangles (with no area), and inverted triangles (flipped against their
+    reference normals).
+    """
     kind = edit['kind']
     if any(not np.isfinite(p).all() for p in list(edit['positions'].values()) + edit['new_points']):
         return False, 'nonfinite_position'
@@ -1297,7 +1438,7 @@ def _validate_edit_geometry(topology, edit, tolerances) -> tuple[bool, str]:
         ):
             return False, 'duplicate_triangle'
         keys.add(key)
-    areas, normals, _ = _geometry(_candidate_point(topology, edit, faces))
+    areas, normals, _ = _geometry(_candidate_point(topology, edit, faces), with_angles=False)
     if not np.isfinite(areas).all() or np.any(areas <= tolerances['area']):
         return False, 'degenerate_triangle'
     if normal_references and np.any(
@@ -1308,7 +1449,10 @@ def _validate_edit_geometry(topology, edit, tolerances) -> tuple[bool, str]:
 
 
 def _validate_edit_connectivity(topology, edit) -> tuple[bool, str]:
-    """Check edge incidence changes and ensure retired vertices lose all faces."""
+    """Check the change in edge incidence (the number of faces on an edge) and retired vertices.
+
+    An edit is rejected if it gives an edge too many faces or leaves a retired vertex in use.
+    """
     kind = edit['kind']
     if kind == 'move':
         return True, 'ok'
@@ -1317,8 +1461,8 @@ def _validate_edit_connectivity(topology, edit) -> tuple[bool, str]:
     incidence_delta.subtract(
         edge for face_id in edit['remove_faces'] for edge in _face_edge(topology['faces'][face_id])
     )
-    # A split may pass its source edge's high incidence to child edges. Otherwise
-    # an edit may neither create incidence above two nor worsen high incidence.
+    # A split may pass high incidence (more than two faces) from its edge on to the two halves.
+    # No other edit may raise an edge's incidence above two, or raise it further if it's higher.
     split_limit = len(topology['edge_to_faces'].get(edit['edge'], ())) if kind == 'split' else 2
     for edge, change in incidence_delta.items():
         old_incidence = len(topology['edge_to_faces'].get(edge, ()))
@@ -1334,10 +1478,15 @@ def _validate_edit_connectivity(topology, edit) -> tuple[bool, str]:
     return True, 'ok'
 
 
-def _commit_edit(mesh, topology, edit, features, boundary):
-    """Commit prevalidated records; all expected rejection happens before mutation."""
+def _commit_edit(mesh, topology, edit, boundary):
+    """Apply an edit that has already passed validation, and record it.
+
+    Each operation is counted, and a nested replacement also gets a record in the report. A
+    stale edit, made for an earlier revision of the mesh, raises an error. Every other
+    rejection happens before this point.
+    """
     if edit['revision'] != topology['revision']:
-        raise RuntimeError('attempt to commit a stale edit')
+        raise RuntimeError('cannot apply an edit made for an earlier version of the mesh')
     vertex_count = len(topology['vertex_positions'])
     required_capacity = vertex_count + len(edit['new_points'])
     if required_capacity > len(topology['vertex_buffer']):
@@ -1368,38 +1517,38 @@ def _commit_edit(mesh, topology, edit, features, boundary):
     _refresh_geometry(mesh, topology)
     topology['revision'] += 1
     topology['counts'][edit['kind']] += 1
-    if edit['kind'] in ('repair_collapse', 'enclosed_region_collapse'):
-        accepted_edit = dict(
-            kind=edit['kind'],
-            iteration=edit.get('iteration_index', -1) + 1,
-            edge=list(edit['edge']),
-            removed_faces=len(edit['remove_faces']),
-            added_faces=len(edit['add_faces']),
-            repair_failure=edit.get('deletion_evidence', {}).get('repair_failure'),
+    if edit['kind'] == 'nested_replacement':
+        topology['replacements'].append(
+            dict(
+                kind=edit['kind'],
+                iteration=edit.get('iteration_index', -1) + 1,
+                edge=list(edit['edge']),
+                removed_faces=len(edit['remove_faces']),
+                added_faces=len(edit['add_faces']),
+                repair_failure=edit.get('repair_failure'),
+                outer_triangle=[*map(int, edit['edge']), int(edit['outer_vertex'])],
+            )
         )
-        topology['ledger'].append(accepted_edit)
-        if edit['kind'] == 'enclosed_region_collapse':
-            accepted_edit['enclosed_face_count'] = len(edit['enclosed_faces'])
-            accepted_edit['enclosures'] = [
-                dict(
-                    method=region['method'],
-                    cycle=list(map(int, region['cycle']['vertices'])),
-                    enclosed_face_count=len(region['faces']),
-                    support_face_count=len(region.get('support_faces', ())),
-                    nested_chord_face_count=len(region.get('nested_chord_faces', ())),
-                    cap_count=region.get('cap_count', 1),
-                    cap_face_counts=[len(cap['faces']) for cap in region.get('caps', ())],
-                )
-                for region in edit['regions']
-            ]
-            topology['deletions'].append(accepted_edit.copy())
 
 
-# Collapse policy and bounded local repair
+# Collapsing short edges and local repair
 
 
-def _classify_collapse_neighborhood(mesh, topology, edge, features, boundary):
-    """Identify protection and vertex/edge link obstructions to ordinary collapse."""
+def _classify_collapse_neighborhood(topology, edge, features, boundary):
+    """Identify the protections and link obstructions that stand in the way of a collapse.
+
+    The link of a vertex is the ring of vertices and edges opposite it in its faces. The link
+    condition says an edge can collapse safely only if the links of its end points share
+    nothing except the corners opposite the edge. Breaking that is a link obstruction.
+
+    Returns a dictionary with these entries:
+        incident: the faces of the edge.
+        common: the neighbors shared by both end points.
+        extra: the shared neighbors that aren't opposite corners of the edge's faces.
+        problematic: the collapse is blocked, because the edge has more than two faces, there
+            are extra neighbors, or the links of both end points share an edge.
+        eligible: the edge exists, and isn't a feature edge or on a frozen boundary.
+    """
     incident = topology['edge_to_faces'].get(edge, set())
     u, v = edge
     common_neighbors = topology['vertex_neighbors'][u] & topology['vertex_neighbors'][v]
@@ -1407,8 +1556,8 @@ def _classify_collapse_neighborhood(mesh, topology, edge, features, boundary):
         int(w) for face_id in incident for w in topology['faces'][face_id] if w not in edge
     }
     obstructing_neighbors = common_neighbors - opposite_vertices
-    # The link condition also has an edge part: shared opposite edges would
-    # create duplicate triangles (e.g. a tetrahedral pair of caps) on collapse.
+    # The link condition also has an edge part: if the links of both end points share an edge,
+    # the collapse would create duplicate triangles, as on a tetrahedron.
     link_u = {
         _edge(*(int(w) for w in topology['faces'][face_id] if w != u))
         for face_id in topology['vertex_to_faces'][u]
@@ -1422,9 +1571,7 @@ def _classify_collapse_neighborhood(mesh, topology, edge, features, boundary):
         incident=set(incident),
         common=set(common_neighbors),
         extra=set(obstructing_neighbors),
-        shared_link_edges=shared_link_edges,
         problematic=len(incident) > 2 or bool(obstructing_neighbors) or bool(shared_link_edges),
-        revision=topology['revision'],
         eligible=bool(incident)
         and edge not in features['edges']
         and edge not in boundary['frozen']['edges'],
@@ -1436,41 +1583,49 @@ def _collapse_short_edge(
     topology,
     features,
     boundary,
-    reference,
     parameters,
     tolerances,
-    collapse_history,
     *,
     boundary_only,
     iteration_index,
-    is_final_pass=False,
+    include_new_edges=False,
 ):
-    """Attempt each queued collapse and accumulate its accepted/rejected outcome."""
-    accepted_count = 0
-    candidates = _collect_candidate_edge(
-        mesh, topology, parameters, boundary_only=boundary_only, operation='collapse'
-    )
-    for edge in candidates:
-        accepted, reason = _attempt_collapse(
-            mesh,
-            topology,
-            edge,
-            features,
-            boundary,
-            reference,
-            parameters,
-            tolerances,
-            collapse_history,
-            boundary_only=boundary_only,
-            iteration_index=iteration_index,
-            is_final_pass=is_final_pass,
-        )
-        accepted_count += accepted
-        topology['outcomes'][reason] += 1
-    for edge in list(collapse_history):
-        if edge not in topology['edge_to_faces']:
-            del collapse_history[edge]
-    return accepted_count
+    """Try to collapse each short edge, and keep the reason from the last try on each one.
+
+    With include_new_edges, go round again until the edges that became short along the way
+    have had one try too. Those edges only get an ordinary collapse, because a repair can
+    replace a short edge with another one forever. Without repair no vertices are added, so
+    this ends.
+    """
+    tried, allow_repair = set(), True
+    while True:
+        candidates = [
+            edge
+            for edge in _collect_candidate_edge(
+                topology, parameters, boundary_only=boundary_only, operation='collapse'
+            )
+            if edge not in tried
+        ]
+        for edge in candidates:
+            _, reason = _attempt_collapse(
+                mesh,
+                topology,
+                edge,
+                features,
+                boundary,
+                parameters,
+                tolerances,
+                boundary_only=boundary_only,
+                iteration_index=iteration_index,
+                allow_repair=allow_repair,
+            )
+            # An edge that changed while it waited in the queue wasn't really tried.
+            if reason not in ('edge_removed', 'not_short', 'classification_changed'):
+                topology['collapse_failures'][edge] = reason
+        if not candidates or not include_new_edges:
+            return
+        tried.update(candidates)
+        allow_repair = False
 
 
 def _attempt_collapse(
@@ -1479,68 +1634,68 @@ def _attempt_collapse(
     edge,
     features,
     boundary,
-    reference,
     parameters,
     tolerances,
-    collapse_history,
     *,
     boundary_only,
     iteration_index,
-    is_final_pass=False,
     allow_repair=True,
 ):
-    """Try ordinary collapse, local repair, then phase-gated region deletion.
+    """Try to collapse one short edge, using repair and nested replacement if it's blocked.
 
-    Failed proposals leave the live mesh unchanged. Ordinary geometry failures
-    never authorize deletion: the edge must have a link/incidence obstruction,
-    fail a current repair attempt, and pass the iteration gate. Scratch repair
-    patches disable recursive repair. A final pass keeps its supplied iteration.
+    An edge that isn't blocked only gets ordinary collapses: a rejection for numerical or
+    geometric reasons never leads to repair or replacement. A blocked edge gets a repair
+    attempt. If that fails and the iteration is in the late half, it gets a replacement
+    attempt, and then the collapse is tried again. With allow_repair off, a blocked edge gets
+    neither: repair turns it off on its private copy so it can't recurse, and the final pass
+    turns it off for edges that form during it. The final pass otherwise works the same way,
+    using the last iteration's index.
+
+    Returns (changed, reason). A replacement counts as a change even if the collapse tried
+    after it fails. If repair fails and replacement is refused, the reason names both.
     """
-    # Recheck queued candidates against the current topology.
+    # Earlier edits may have changed this edge since it was queued.
     if edge not in topology['edge_to_faces']:
         return False, 'edge_removed'
     if topology['lengths'][edge] > parameters['min_edge_length']:
         return False, 'not_short'
     if (edge in topology['boundary_edges']) != boundary_only:
         return False, 'classification_changed'
-    classification = _classify_collapse_neighborhood(mesh, topology, edge, features, boundary)
+    classification = _classify_collapse_neighborhood(topology, edge, features, boundary)
     if not classification['eligible']:
         return False, 'protected_edge'
-    ordinary = _propose_edge_collapse(
-        mesh, topology, edge, features, boundary, reference, parameters
-    )
+    ordinary = _propose_edge_collapse(topology, edge, features, boundary)
     if not ordinary:
         return False, 'protected_endpoints'
 
-    # An ordinary neighborhood gets only ordinary collapse proposals.
+    # An edge that isn't blocked only gets ordinary collapses.
     reason = 'link_obstruction'
     if not classification['problematic']:
         for edit in ordinary:
             if not _passes_collapse_length_check(
-                mesh, topology, edit, parameters, boundary_only=boundary_only
+                topology, edit, parameters, boundary_only=boundary_only
             ):
                 reason = 'neighbor_length'
                 continue
             valid, reason = _validate_edit(
-                mesh, topology, edit, features, boundary, reference, parameters, tolerances
+                mesh, topology, edit, features, boundary, parameters, tolerances
             )
             if valid:
                 edit['iteration_index'] = iteration_index
-                _commit_edit(mesh, topology, edit, features, boundary)
+                _commit_edit(mesh, topology, edit, boundary)
                 return True, 'ordinary_collapsed'
-        # Numerical/geometry rejections are not permission for destructive fallback.
+        # A rejection here doesn't allow repair or replacement.
         return False, reason
 
-    # Repair on a private patch; commit the combined edit only after validation.
+    # Repair a private copy of the patch, and apply the result only if it passes validation.
     if not allow_repair:
-        return False, 'scratch_link_obstruction'
+        return False, 'link_obstruction'
     edit, failure = _try_repair_collapse_patch(
         mesh,
         topology,
         edge,
         features,
         boundary,
-        reference,
         parameters,
         tolerances,
         boundary_only=boundary_only,
@@ -1548,60 +1703,54 @@ def _attempt_collapse(
     )
     if edit is not None:
         valid, failure = _validate_edit(
-            mesh, topology, edit, features, boundary, reference, parameters, tolerances
+            mesh, topology, edit, features, boundary, parameters, tolerances
         )
         if valid:
             edit['iteration_index'] = iteration_index
-            _commit_edit(mesh, topology, edit, features, boundary)
+            _commit_edit(mesh, topology, edit, boundary)
             return True, 'repaired_collapsed'
 
-    # A failed repair is recorded even during the early, protected iterations.
-    collapse_history[edge] = dict(
-        iteration_index=iteration_index, revision=topology['revision'], repair_failure=failure
-    )
-    if not _deletion_phase_allowed(iteration_index, parameters['max_iter']):
+    if not _replacement_phase_allowed(iteration_index, parameters['max_iter']):
         return False, 'deferred_after_repair_failure'
-    current = _classify_collapse_neighborhood(mesh, topology, edge, features, boundary)
-    if not current['problematic']:
-        return False, 'no_longer_problematic'
 
-    # Late fallback requires complete, unambiguous enclosure certificates.
-    regions = []
-    for cycle in _find_enclosing_cycle(mesh, topology, edge, tolerances):
-        region, diagnostic = _collect_enclosed_face(mesh, topology, cycle, tolerances)
-        if region is not None:
-            regions.append(region)
-    regions, diagnostic = _select_outermost_enclosed_region(regions, edge)
-    if not regions:
-        return False, diagnostic
-    evidence = dict(
+    # Late fallback: replace nested triangles, then try this edge again.
+    replaced, refusal = _replace_nested_triangles(
+        mesh,
+        topology,
+        edge,
+        features,
+        boundary,
+        parameters,
+        tolerances,
         iteration_index=iteration_index,
-        revision=topology['revision'],
-        repair_failure=failure,
-        problematic=True,
+        repair_failure=failure or 'repair_failed',
     )
-    for edit in _propose_enclosed_region_collapse(
-        mesh, topology, edge, regions, features, boundary, reference, parameters, evidence
-    ):
-        if not _passes_collapse_length_check(
-            mesh, topology, edit, parameters, boundary_only=boundary_only
-        ):
-            reason = 'neighbor_length'
-            continue
-        valid, reason = _validate_edit(
-            mesh, topology, edit, features, boundary, reference, parameters, tolerances
-        )
-        if valid:
-            _commit_edit(mesh, topology, edit, features, boundary)
-            return True, 'enclosed_region_collapsed'
-    return False, reason
+    if not replaced:
+        return False, f"{failure or 'repair_failed'}, {refusal}"
+    accepted, reason = _attempt_collapse(
+        mesh,
+        topology,
+        edge,
+        features,
+        boundary,
+        parameters,
+        tolerances,
+        boundary_only=boundary_only,
+        iteration_index=iteration_index,
+    )
+    return True, reason if accepted else 'nested_triangles_replaced'
 
 
 def _extract_repair_patch(mesh, topology, edge, features, boundary, parameters, *, ring_count):
-    """Copy a bounded face neighborhood and map source IDs into local patch IDs.
+    """Copy the faces around an edge into a patch with its own vertex numbering.
 
-    Protect feature geometry, frozen boundaries, and patch interfaces so replacing
-    the patch cannot alter unrelated faces. Return (patch, reason).
+    ring_count is how many rings of faces around the edge's end points to include. Features,
+    frozen boundaries and the patch's interface (the edges and vertices it shares with the
+    rest of the mesh) are protected, so putting the patch back can't change any other face.
+    A protected edge can join two patch vertices without lying on a patch face. Those are its
+    absent_edges, and an edit that doesn't add them is refused.
+    Returns (patch, 'ok'), or
+    (None, 'repair_patch_budget') if the patch would have too many faces.
     """
     faces = set().union(*(topology['vertex_to_faces'][v] for v in edge))
     for _ in range(max(0, ring_count - 1)):
@@ -1616,22 +1765,26 @@ def _extract_repair_patch(mesh, topology, edge, features, boundary, parameters, 
     fixed = {v for v in source_ids if topology['vertex_to_faces'][v] - faces}
     fixed.update(features['points'] & set(source_ids))
     fixed.update(boundary['frozen']['points'] & set(source_ids))
-    # Protect interface edges, not arbitrary chords between two fixed vertices.
+    # Protect interface edges, not every edge that joins two fixed vertices.
     interface_edges = {
         e for e, fs in topology['edge_to_faces'].items() if fs & faces and fs - faces
     }
     protected_edges = features['edges'] | boundary['frozen']['edges'] | interface_edges
-    local_edges = {
-        _edge(global_to_local[a], global_to_local[b])
-        for a, b in protected_edges
-        if a in global_to_local and b in global_to_local
-    }
+    patch_edges = {e for f in faces for e in _face_edge(topology['faces'][f])}
+    local_edges, absent_edges = set(), set()
+    for a, b in protected_edges:
+        if a in global_to_local and b in global_to_local:
+            local_edge = _edge(global_to_local[a], global_to_local[b])
+            local_edges.add(local_edge)
+            if (a, b) not in patch_edges:
+                absent_edges.add(local_edge)
     local_points = {global_to_local[v] for v in fixed}
     local_points.update(v for e in local_edges for v in e)
     local_features = dict(
         points=local_points,
         edges=local_edges,
         positions={v: _as_numpy(submesh.node)[v].copy() for v in local_points},
+        absent_edges=absent_edges,
     )
     local_boundary = dict(
         enabled=boundary['enabled'],
@@ -1648,32 +1801,33 @@ def _extract_repair_patch(mesh, topology, edge, features, boundary, parameters, 
             original=_copy_source_mesh(submesh),
             face_ids=faces,
             source_ids=source_ids,
-            global_to_local=global_to_local,
             edge=_edge(*(global_to_local[v] for v in edge)),
             original_edge=edge,
+            round_positions=topology['round_positions'],
             features=local_features,
             boundary=local_boundary,
-            revision=topology['revision'],
         ),
         'ok',
     )
 
 
-def _repair_patch_geometry(patch, reference, parameters, tolerances):
-    """Resolve nonfacial link obstructions by conforming local edge subdivision.
+def _repair_patch_geometry(patch, parameters, tolerances):
+    """Try to clear a link obstruction by subdividing the edges to the extra neighbors.
 
-    This preserves triangle support exactly before retrying collapse. Repair is
-    specific to this remesher's link checks and interface constraints. Genuine
-    junctions with >2 incident sheets cannot be turned into a manifold edge without
-    separating or erasing sheets, so they return an explicit repair failure.
+    This works on a private copy. Each split adds a midpoint on an existing edge, so the shape
+    doesn't change. Splitting stops when the edge is no longer blocked, no split is allowed, or
+    a budget runs out. The caller then tries the collapse and checks the result. A junction,
+    an edge where more than two sheets of surface meet, can't become a manifold edge (one with
+    at most two faces) without separating or erasing a sheet, so it's a repair failure.
+    Returns (repaired, reason).
     """
     mesh = _copy_source_mesh(patch['mesh'])
-    topology = _initialize_topology(mesh)
+    topology = _initialize_topology(mesh, round_positions=patch['round_positions'])
     edge, features, boundary = patch['edge'], patch['features'], patch['boundary']
     if len(topology['edge_to_faces'][edge]) > 2:
         return None, 'repair_requires_sheet_erasure_or_disconnection'
     for attempt in range(parameters['repair_max_attempts'] + 1):
-        classification = _classify_collapse_neighborhood(mesh, topology, edge, features, boundary)
+        classification = _classify_collapse_neighborhood(topology, edge, features, boundary)
         if not classification['problematic']:
             return dict(mesh=mesh, topology=topology, features=features, boundary=boundary), 'ok'
         if (
@@ -1687,16 +1841,14 @@ def _repair_patch_geometry(patch, reference, parameters, tolerances):
         )
         changed = False
         for candidate in candidates:
-            edit = _propose_edge_split(
-                mesh, topology, candidate, features, boundary, reference, parameters
-            )
+            edit = _propose_edge_split(topology, candidate, features, boundary)
             if edit is None:
                 continue
             valid, _ = _validate_edit(
-                mesh, topology, edit, features, boundary, reference, parameters, tolerances
+                mesh, topology, edit, features, boundary, parameters, tolerances
             )
             if valid:
-                _commit_edit(mesh, topology, edit, features, boundary)
+                _commit_edit(mesh, topology, edit, boundary)
                 changed = True
                 break
         if not changed:
@@ -1705,7 +1857,7 @@ def _repair_patch_geometry(patch, reference, parameters, tolerances):
 
 
 def _sample_triangle(mesh):
-    """Sample triangle vertices, centroids, and edge midpoints for repair distance checks."""
+    """Return the corners, centroids and edge midpoints of all triangles, for distance checks."""
     xyz = _as_numpy(mesh.node)[_as_numpy(mesh.element)]
     if not len(xyz):
         return np.empty((0, 3))
@@ -1720,8 +1872,13 @@ def _sample_triangle(mesh):
     )
 
 
-def _validate_repair_collapse(patch, repaired, reference, parameters, tolerances):
-    """Check repaired-patch constraints, manifoldness, sampled distance, and components."""
+def _validate_repair_collapse(patch, repaired, parameters, tolerances):
+    """Check a repaired patch after its collapse, and return (valid, reason).
+
+    The patch must still have faces, keep its protections, be a valid manifold mesh (no edge
+    with more than two faces), stay within repair_distance of the original at the sampled
+    points, and keep the same number of connected components.
+    """
     mesh, topology = repaired['mesh'], repaired['topology']
     if not len(mesh.element):
         return False, 'repair_erases_component'
@@ -1729,11 +1886,12 @@ def _validate_repair_collapse(patch, repaired, reference, parameters, tolerances
     if not valid:
         return valid, reason
     try:
-        _validate_mesh(mesh, topology, tolerances, strict_manifold=True)
+        _validate_mesh(topology, tolerances, strict_manifold=True)
     except ValueError:
         return False, 'invalid_repaired_patch'
-    # Check sampled distance BOTH ways, including triangle interiors. This is a
-    # measured approximation bound, not a proof of exact Hausdorff distance.
+    # Check sampled distances in both directions, including points inside triangles. This
+    # measures the distance approximately. It doesn't prove a bound on the Hausdorff distance
+    # (the largest distance from a point on either surface to the other surface).
     for source, target in ((patch['original'], mesh), (mesh, patch['original'])):
         locator = _build_cell_locator(target)
         if any(
@@ -1741,14 +1899,14 @@ def _validate_repair_collapse(patch, repaired, reference, parameters, tolerances
             for p in _sample_triangle(source)
         ):
             return False, 'repair_shape_error'
-    # No component/sheet may disappear merely because another one lies nearby.
+    # The repair must not change the number of connected components.
     if _component_count(patch['original']) != _component_count(mesh):
         return False, 'repair_changes_components'
     return True, 'ok'
 
 
 def _component_count(mesh):
-    """Count face components connected through shared vertices."""
+    """Count the connected components: the groups of faces joined through shared vertices."""
     faces = _as_numpy(mesh.element)
     vertex_to_faces = {}
     for face_id, face in enumerate(faces):
@@ -1768,8 +1926,13 @@ def _component_count(mesh):
     return count
 
 
-def _compose_repair_collapse_edit(mesh, topology, patch, repaired, features, boundary):
-    """Map an accepted scratch-patch result into one atomic edit of the live mesh."""
+def _compose_repair_collapse_edit(mesh, topology, patch, repaired, features):
+    """Turn an accepted repaired patch into one edit of the live mesh.
+
+    The patch's faces replace the faces it was copied from, and its new vertices are added at
+    the end. A patch vertex that no face uses any more is retired, unless it's a feature point
+    or still has faces outside the patch.
+    """
     local_mesh = repaired['mesh']
     original_vertex_count = len(patch['source_ids'])
     vertex_mapping = dict(enumerate(patch['source_ids']))
@@ -1816,14 +1979,17 @@ def _try_repair_collapse_patch(
     edge,
     features,
     boundary,
-    reference,
     parameters,
     tolerances,
     *,
     boundary_only,
     iteration_index,
 ):
-    """Try bounded patch sizes and return a validated compound edit or failure reason."""
+    """Try repair on a small patch, then a larger one. Return (edit, 'ok') or (None, reason).
+
+    Each try copies a patch, splits edges to unblock the edge, collapses it and checks the
+    result. reason comes from the last step that failed.
+    """
     reason = 'repair_failed'
     for rings in range(1, parameters['repair_rings'] + 1):
         patch, reason = _extract_repair_patch(
@@ -1831,7 +1997,7 @@ def _try_repair_collapse_patch(
         )
         if patch is None:
             continue
-        repaired, reason = _repair_patch_geometry(patch, reference, parameters, tolerances)
+        repaired, reason = _repair_patch_geometry(patch, parameters, tolerances)
         if repaired is None:
             continue
         accepted, reason = _attempt_collapse(
@@ -1840,167 +2006,48 @@ def _try_repair_collapse_patch(
             patch['edge'],
             repaired['features'],
             repaired['boundary'],
-            reference,
             parameters,
             tolerances,
-            {},
             boundary_only=boundary_only,
             iteration_index=iteration_index,
             allow_repair=False,
         )
         if not accepted:
             continue
-        valid, reason = _validate_repair_collapse(
-            patch, repaired, reference, parameters, tolerances
-        )
+        valid, reason = _validate_repair_collapse(patch, repaired, parameters, tolerances)
         if valid:
-            return (
-                _compose_repair_collapse_edit(mesh, topology, patch, repaired, features, boundary),
-                'ok',
-            )
+            return _compose_repair_collapse_edit(mesh, topology, patch, repaired, features), 'ok'
     return None, reason
 
 
-# Enclosure discovery and certification
-
-
-def _find_enclosing_cycle(mesh, topology, edge, tolerances):
-    """Enumerate three-edge cycles through the candidate edge and its common neighbors."""
-    u, v = edge
-    return [
-        dict(vertices=(u, v, w), edge=edge, revision=topology['revision'])
-        for w in sorted(topology['vertex_neighbors'][u] & topology['vertex_neighbors'][v])
-    ]
-
-
-def _inside_cycle(points, triangle, tolerances):
-    """Verified coplanar barycentric containment; never a screen projection test."""
-    a, b, c = triangle
-    e0, e1 = b - a, c - a
-    normal = np.cross(e0, e1)
-    normal_length = np.linalg.norm(normal)
-    if normal_length <= 2 * tolerances['area']:
-        return np.zeros(np.shape(points)[:-1], dtype=bool)
-    displacement = points - a
-    d00, d01, d11 = np.dot(e0, e0), np.dot(e0, e1), np.dot(e1, e1)
-    determinant = d00 * d11 - d01 * d01
-    if determinant <= 0:
-        return np.zeros(np.shape(points)[:-1], dtype=bool)
-    v = (d11 * (displacement @ e0) - d01 * (displacement @ e1)) / determinant
-    w = (d00 * (displacement @ e1) - d01 * (displacement @ e0)) / determinant
-    barycentric_tolerance = tolerances['barycentric']
-    return (
-        (np.abs(displacement @ normal) / normal_length <= tolerances['plane'])
-        & (v >= -barycentric_tolerance)
-        & (w >= -barycentric_tolerance)
-        & (v + w <= 1 + barycentric_tolerance)
-    )
-
-
-def _collect_planar_enclosed_face(mesh, topology, cycle, tolerances):
-    """Collect all connected coplanar interior faces, including nonincident faces.
-
-    Curved/ambiguous interiors are conservatively declined. All boundary-edge seeds
-    are considered, so nested triangles sharing (u,v) are never truncated to two.
-    """
-    vertices = cycle['vertices']
-    barriers = set(_face_edge(vertices))
-    triangle = topology['vertex_positions'][list(vertices)]
-    inside_cache = {}
-
-    def inside(face_id):
-        if face_id not in inside_cache:
-            inside_cache[face_id] = bool(
-                _inside_cycle(
-                    topology['vertex_positions'][topology['faces'][face_id]], triangle, tolerances
-                ).all()
-            )
-        return inside_cache[face_id]
-
-    seeds = {
-        face_id
-        for edge in barriers
-        for face_id in topology['edge_to_faces'].get(edge, ())
-        if inside(face_id)
-    }
-    if not seeds:
-        return None, 'no_verified_planar_interior'
-    selected, queue = set(seeds), deque(sorted(seeds))
-    while queue:
-        face_id = queue.popleft()
-        for edge in _face_edge(topology['faces'][face_id]):
-            if edge in barriers:
-                continue
-            for other in sorted(topology['edge_to_faces'].get(edge, ())):
-                if other not in selected and inside(other):
-                    selected.add(other)
-                    queue.append(other)
-    # Every cycle side must be supported on its inner side. Additional exposed
-    # interior edges may belong to nested overlaid triangles in the user's example.
-    if any(not (topology['edge_to_faces'][edge] & selected) for edge in barriers):
-        return None, 'incomplete_enclosing_cycle'
-    normal = np.cross(triangle[1] - triangle[0], triangle[2] - triangle[0])
-    directions = np.array([np.dot(topology['normals'][face_id], normal) for face_id in selected])
-    if np.any(directions > 0) and np.any(directions < 0):
-        return None, 'ambiguous_sheet_orientation'
-    # A traversal interface off the cycle is evidence of a folded/partial region.
-    for face_id in selected:
-        for edge in _face_edge(topology['faces'][face_id]):
-            if edge not in barriers and any(
-                other not in selected for other in topology['edge_to_faces'][edge]
-            ):
-                return None, 'ambiguous_interior_interface'
-    return (
-        dict(
-            cycle=cycle,
-            faces=selected,
-            vertices={int(v) for face_id in selected for v in topology['faces'][face_id]},
-            triangle=triangle.copy(),
-            revision=topology['revision'],
-            method='coplanar_containment',
-        ),
-        'ok',
-    )
+# Nested-triangle replacement
+#
+# A short edge (u, v) is blocked when u and v share extra neighbors w. Each one forms a
+# triangle of edges (u, v, w) that is not an element, and merging u and v would flatten it.
+# The nest on one side of (u, v) is the surface inside the outermost such triangle. It must
+# be a disk: a patch with one boundary and no holes. Replacing the nest with the one element
+# (u, v, w) clears that side of (u, v), which can leave (u, v) as an ordinary short edge. The
+# boundary of the nest doesn't change, so the surface keeps its Euler value (vertices minus
+# edges plus faces, which changes only if holes, boundaries or components change), boundary
+# loops and connected components, and can't be emptied.
 
 
 def _edge_direction(face, edge):
-    """Orientation of an existing edge in an oriented triangle, independent of XYZ."""
+    """Return 1 if the triangle runs along the edge from edge[0] to edge[1], otherwise -1."""
     face = tuple(face)
     i = face.index(edge[0])
     return 1 if face[(i + 1) % 3] == edge[1] else -1
 
 
-def _collect_cut_disk(topology, barriers, anchor, excluded):
-    """Find and certify one surface disk without crossing cycle edges or sheets.
-
-    Other faces incident to the collapsing edge are provisionally excluded so
-    redundant (u,v,w_i) chords do not masquerade as sheet continuations. A valid
-    disk has exactly the requested boundary, coherent orientation, Euler value 1,
-    and a connected path/cycle link at every boundary/interior vertex.
-    """
-    selected_faces, queue = {anchor}, deque([anchor])
-    while queue:
-        face_id = queue.popleft()
-        for edge in _face_edge(topology['faces'][face_id]):
-            if edge in barriers:
-                continue
-            adjacent = topology['edge_to_faces'][edge] - excluded
-            if len(adjacent) > 2:
-                return None, 'unresolved_nonmanifold_disk_edge'
-            for other in sorted(adjacent):
-                if other not in selected_faces:
-                    selected_faces.add(other)
-                    queue.append(other)
-    return _certify_disk(topology, selected_faces, barriers)
-
-
 def _certify_disk(topology, selected_faces, barriers):
-    """Certify a traversed region's boundary, Euler value, orientation, and links.
+    """Check that the selected faces form a disk bounded exactly by the barrier edges.
 
-    A vertex link connects each incident triangle's two other vertices. Interior
-    links must be connected cycles; boundary links must be connected paths ending
-    at that vertex's two boundary neighbors. This is a topological certificate,
-    not a geometric self-intersection check. Return (certificate, reason).
+    The faces must be consistently oriented, have Euler value 1 (vertices minus edges plus
+    faces), and have a valid link at every vertex. The link of a vertex joins the other two
+    corners of each of its faces. At an interior vertex the link must be a closed loop, and at
+    a boundary vertex it must be a path between its two boundary neighbors. This is a
+    topological certificate: it checks connectivity only, not self-intersection (whether the
+    surface passes through itself). Returns (disk, reason).
     """
     edge_to_faces, vertex_links = {}, {}
     for face_id in selected_faces:
@@ -2045,268 +2092,240 @@ def _certify_disk(topology, selected_faces, barriers):
     return dict(faces=selected_faces, vertices=set(vertex_links), edges=set(edge_to_faces)), 'ok'
 
 
-def _collect_curved_enclosed_face(mesh, topology, cycle, tolerances):
-    """Resolve a disk or a certified pair of caps, including nested UV chords.
+def _distance_to_triangle(point, a, b, c):
+    """Return the distance from a point to a triangle. A degenerate triangle uses its edges."""
+    normal = np.cross(b - a, c - a)
+    squared = float(normal @ normal)
+    if squared > 0:
+        s = float(np.cross(b - a, point - a) @ normal) / squared
+        t = float(np.cross(point - a, c - a) @ normal) / squared
+        if s >= 0 and t >= 0 and s + t <= 1:
+            return abs(float((point - a) @ normal)) / math.sqrt(squared)
+    best = math.inf
+    for start, end in ((a, b), (b, c), (c, a)):
+        direction = end - start
+        length_squared = max(float(direction @ direction), 1e-300)
+        fraction = float(np.clip((point - start) @ direction / length_squared, 0, 1))
+        best = min(best, float(np.linalg.norm(point - (start + fraction * direction))))
+    return best
 
-    No projected containment, normal-angle threshold, or smallest-side heuristic
-    is used. Two disks meeting only on their common boundary may be erased together;
-    intersecting candidates and junctions of more than two caps remain unresolved.
-    Arbitrarily curved/folded embedded disks are supported; as elsewhere in this
-    remesher this is not a general geometric self-intersection certification.
+
+def _search_nest_side(topology, edge, anchor_face_id, w, max_faces):
+    """Search the side of the triangle of edges (u, v, w) that holds this element.
+
+    The search starts at anchor_face_id and spreads across every edge except the triangle's
+    three. Returns (disk, status). status is 'ok' if that side is a disk, 'not_disk' if it
+    isn't, or 'over_budget' if the search stopped at max_faces and the answer is unknown.
     """
-    edge = cycle['edge']
-    cycle_edges = set(_face_edge(cycle['vertices']))
-    if edge not in cycle_edges or not all(e in topology['edge_to_faces'] for e in cycle_edges):
-        return None, 'invalid_enclosing_cycle'
-    incident_faces = topology['edge_to_faces'][edge]
-    candidates, diagnostics = [], []
-    for anchor_face_id in sorted(incident_faces):
-        certified_disk, reason = _collect_cut_disk(
-            topology, cycle_edges, anchor_face_id, incident_faces - {anchor_face_id}
-        )
-        if certified_disk is None:
-            diagnostics.append(reason)
+    barriers = set(_face_edge((*edge, w)))
+    selected, queue = {anchor_face_id}, deque([anchor_face_id])
+    while queue:
+        for face_edge in _face_edge(topology['faces'][queue.popleft()]):
+            if face_edge in barriers:
+                continue
+            for other in topology['edge_to_faces'][face_edge]:
+                if other not in selected:
+                    selected.add(other)
+                    if len(selected) > max_faces:
+                        return None, 'over_budget'
+                    queue.append(other)
+    disk = _certify_disk(topology, selected, barriers)[0]
+    return disk, 'ok' if disk is not None else 'not_disk'
+
+
+def _largest_nest(topology, edge, anchor, common, incident, max_faces):
+    """Return (w, disk, other_side_disk) for the largest nest on the anchor's side.
+
+    Returns None if there is no nest, or 'over_budget' if a search hit the face budget and nothing
+    on this side can be used.
+
+    On a closed surface, a triangle of edges has a disk on both sides, so a side counts as
+    the nest only if the other side isn't known to be a disk or is at least as large. A side
+    with one element counts as size 1, and has nothing inside it to replace.
+
+    If a search hits the face budget, the answer is unknown. Unless the other side is a
+    known smaller nest, nothing on this side is used, because a smaller disk could hide a
+    vertex of a larger one.
+    """
+
+    def opposite(face_id):
+        return next(int(x) for x in topology['faces'][face_id] if x not in edge)
+
+    best = None
+    for w in sorted(common - {opposite(anchor)}):
+        disk, status = _search_nest_side(topology, edge, anchor, w, max_faces)
+        other_disk, other_size = None, None
+        for other in incident - {anchor}:
+            if opposite(other) == w:
+                other_size = 1
+            else:
+                other_disk, _ = _search_nest_side(topology, edge, other, w, max_faces)
+                other_size = None if other_disk is None else len(other_disk['faces'])
+        if status == 'over_budget':
+            if other_size is None:
+                return 'over_budget'
             continue
-        edge_direction = _edge_direction(topology['faces'][anchor_face_id], edge)
-        enclosed_faces = set(certified_disk['faces'])
-        unresolved_attachment = False
-        for face_id in incident_faces - {anchor_face_id}:
-            face = topology['faces'][face_id]
-            face_edges = set(_face_edge(face))
-            belongs_to_disk = (
-                set(face) <= certified_disk['vertices']
-                and face_edges <= certified_disk['edges']
-                and _edge_direction(face, edge) == edge_direction
+        if disk is None or (other_size is not None and len(disk['faces']) > other_size):
+            continue
+        if best is None or len(disk['faces']) > len(best[1]['faces']):
+            best = (w, disk, other_disk)
+    return best
+
+
+def _element_crosses_surface(topology, element, removed_faces):
+    """Return whether a new element would pass through a remaining face it shares no vertex with.
+
+    This doesn't detect overlap within one plane, or faces that share a vertex with the element.
+    """
+    positions = topology['vertex_positions']
+    faces = np.asarray(topology['faces'])
+    triangle = positions[list(element)]
+    corners = positions[faces]
+    near = np.all(corners.min(axis=1) <= triangle.max(axis=0), axis=1) & np.all(
+        corners.max(axis=1) >= triangle.min(axis=0), axis=1
+    )
+
+    def segment_hits(start, end, tri):
+        direction, e1, e2 = end - start, tri[1] - tri[0], tri[2] - tri[0]
+        h = np.cross(direction, e2)
+        det = float(e1 @ h)
+        if abs(det) <= 1e-14 * max(float(e1 @ e1), float(e2 @ e2), 1e-300):
+            return False
+        from_corner, q = start - tri[0], np.cross(start - tri[0], e1)
+        a, b, t = float(from_corner @ h) / det, float(direction @ q) / det, float(e2 @ q) / det
+        return a >= 0 and b >= 0 and a + b <= 1 and 0 < t < 1
+
+    for face_id in np.flatnonzero(near):
+        if int(face_id) in removed_faces or set(map(int, faces[face_id])) & set(element):
+            continue
+        other = corners[face_id]
+        for first, second in ((triangle, other), (other, triangle)):
+            for i in range(3):
+                if segment_hits(first[i], first[(i + 1) % 3], second):
+                    return True
+    return False
+
+
+def _propose_nested_replacement(
+    topology, edge, anchor, w, disk, *, iteration_index, repair_failure
+):
+    """Propose the one element (u, v, w), oriented like the element it replaces on (u, v)."""
+    edit = _proposal(
+        topology,
+        'nested_replacement',
+        edge=edge,
+        remove=disk['faces'],
+        add=[tuple(int(x) if x in edge else w for x in topology['faces'][anchor])],
+        retired={int(x) for x in disk['vertices']} - {*edge, w},
+        normal_refs=[topology['normals'][anchor]],
+    )
+    edit.update(outer_vertex=w, iteration_index=iteration_index, repair_failure=repair_failure)
+    return edit
+
+
+def _replace_nested_triangles(
+    mesh,
+    topology,
+    edge,
+    features,
+    boundary,
+    parameters,
+    tolerances,
+    *,
+    iteration_index,
+    repair_failure,
+):
+    """Replace the nest on each side of (u, v) with one element, where that is allowed.
+
+    Each nest is replaced whole or not at all, and this stops once the edge isn't blocked.
+    If every inner vertex is within repair_distance of (u, v, w), the whole nest is too,
+    because the distance to a triangle is largest at a corner of a flat face. The element is
+    also that close to the nest, because the nest covers it when projected onto its plane.
+    This limits each replacement, not the total over several edits.
+
+    Only the largest nest is tried, because replacing a smaller one could remove the vertex
+    that keeps the larger one over the limit. If the other side is also within the limit,
+    the two sides would lie on top of each other, so a closed shape that thin is left alone.
+    An edge with more than two faces is left alone too. Returns the number of replacements
+    and the reason for the last refusal, which is 'no_nest' if no side had a nest to try, or
+    'nest_over_budget' if a search for one went over the face budget.
+    """
+    replaced, limit, refusal = 0, parameters['repair_distance'], 'no_nest'
+    while True:
+        current = _classify_collapse_neighborhood(topology, edge, features, boundary)
+        if not current['problematic']:
+            return replaced, refusal
+        if len(current['incident']) > 2:
+            return replaced, 'edge_has_more_than_two_faces'
+        progress = False
+        positions = topology['vertex_positions']
+        for anchor in sorted(current['incident']):
+            nest = _largest_nest(
+                topology,
+                edge,
+                anchor,
+                current['common'],
+                current['incident'],
+                parameters['repair_max_faces'],
             )
-            if belongs_to_disk:
-                enclosed_faces.add(face_id)
-            elif (face_edges & certified_disk['edges']) - cycle_edges:
-                # An opposite/unknown sheet attached inside the disk cannot be
-                # silently omitted or absorbed into the selected interior.
-                unresolved_attachment = True
+            if nest == 'over_budget':
+                refusal = 'nest_over_budget'
+                continue
+            if nest is None:
+                continue
+            w, disk, other_disk = nest
+            triangle = positions[edge[0]], positions[edge[1]], positions[w]
+
+            def within_limit(vertices):
+                return all(
+                    _distance_to_triangle(positions[x], *triangle) <= limit for x in vertices
+                )
+
+            edit = _propose_nested_replacement(
+                topology,
+                edge,
+                anchor,
+                w,
+                disk,
+                iteration_index=iteration_index,
+                repair_failure=repair_failure,
+            )
+            if not within_limit(edit['retired']):
+                refusal = 'nest_over_limit'
+                continue
+            if other_disk is not None and within_limit(other_disk['vertices']):
+                refusal = 'other_side_within_limit'
+                continue
+            if _element_crosses_surface(topology, (*edge, w), disk['faces']):
+                refusal = 'element_crosses_surface'
+                continue
+            valid, reason = _validate_edit(
+                mesh, topology, edit, features, boundary, parameters, tolerances
+            )
+            if valid:
+                _commit_edit(mesh, topology, edit, boundary)
+                replaced += 1
+                progress = True
                 break
-        if unresolved_attachment:
-            diagnostics.append('ambiguous_internal_sheet_attachment')
-            continue
-        candidates.append(
-            dict(
-                cycle=cycle,
-                faces=enclosed_faces,
-                vertices=certified_disk['vertices'],
-                support_faces=certified_disk['faces'],
-                nested_chord_faces=enclosed_faces - certified_disk['faces'],
-                revision=topology['revision'],
-                method='curved_disk',
-                side_direction=edge_direction,
-                boundary_edges=cycle_edges,
-                euler_characteristic=1,
-            )
-        )
-    unique = {frozenset(region['faces']): region for region in candidates}
-    maximal = [
-        region
-        for region in unique.values()
-        if not any(region['faces'] < other['faces'] for other in unique.values())
-    ]
-    if len(maximal) == 1:
-        if len(maximal[0]['support_faces']) == 1:
-            # A lone triangle does not certify the enclosure of other, curved
-            # sheets sharing its edge. The legacy planar proof may still apply.
-            return None, 'no_curved_disk_interior'
-        return maximal[0], 'ok'
-    if len(maximal) == 2:
-        return _combine_cap_pair(topology, cycle, maximal)
-    if len(maximal) > 2:
-        return None, 'ambiguous_cycle_sides'
-    return None, diagnostics[0] if diagnostics else 'no_enclosed_disk'
-
-
-def _combine_cap_pair(topology, cycle, caps):
-    """Certify two disjoint disk interiors and return their complete union.
-
-    Both disks were individually certified. Their support meshes must meet exactly
-    on the three cycle edges/vertices, with opposite boundary orientations. This
-    authorizes removing both sides, not an arbitrary union of ambiguous sheets.
-    Feature, boundary, repair and iteration checks still occur in the edit path.
-    """
-    first, second = caps
-    boundary_vertices = set(cycle['vertices'])
-    barriers = set(_face_edge(cycle['vertices']))
-    if (
-        first['faces'] & second['faces']
-        or first['vertices'] & second['vertices'] != boundary_vertices
-    ):
-        return None, 'ambiguous_intersecting_caps'
-    support_edges = [
-        {e for f in cap['support_faces'] for e in _face_edge(topology['faces'][f])} for cap in caps
-    ]
-    if support_edges[0] & support_edges[1] != barriers:
-        return None, 'ambiguous_intersecting_caps'
-    for edge in barriers:
-        sides = [
-            next(f for f in cap['support_faces'] if edge in _face_edge(topology['faces'][f]))
-            for cap in caps
-        ]
-        if _edge_direction(topology['faces'][sides[0]], edge) == _edge_direction(
-            topology['faces'][sides[1]], edge
-        ):
-            return None, 'ambiguous_cap_orientation'
-    return (
-        dict(
-            cycle=cycle,
-            faces=first['faces'] | second['faces'],
-            vertices=first['vertices'] | second['vertices'],
-            support_faces=first['support_faces'] | second['support_faces'],
-            nested_chord_faces=first['nested_chord_faces'] | second['nested_chord_faces'],
-            revision=topology['revision'],
-            method='curved_two_caps',
-            caps=caps,
-            cap_count=2,
-            cycle_edges=barriers,
-            boundary_edges=set(),
-            euler_characteristic=2,
-        ),
-        'ok',
-    )
-
-
-def _collect_enclosed_face(mesh, topology, cycle, tolerances):
-    """Collect a planar enclosure, an intrinsic disk, or both certified cap sides.
-
-    Keep the existing geometric rule for coplanar overlaid triangles whose free
-    vertices need not belong to a connected support disk. Only use that rule when
-    all UV-incident faces are coplanar with the cycle; it must not silently ignore
-    another curved sheet. Otherwise establish the enclosure from surface topology.
-    """
-    triangle = topology['vertex_positions'][list(cycle['vertices'])]
-    normal = np.cross(triangle[1] - triangle[0], triangle[2] - triangle[0])
-    magnitude = np.linalg.norm(normal)
-    if magnitude <= 2 * tolerances['area']:
-        return None, 'degenerate_enclosing_cycle'
-    curved, reason = _collect_curved_enclosed_face(mesh, topology, cycle, tolerances)
-    if reason.startswith('ambiguous_'):
-        return None, reason
-    vertices = {
-        int(v)
-        for f in topology['edge_to_faces'].get(cycle['edge'], ())
-        for v in topology['faces'][f]
-    }
-    distance = (
-        np.abs((topology['vertex_positions'][sorted(vertices)] - triangle[0]) @ normal) / magnitude
-    )
-    planar = None
-    if np.all(distance <= tolerances['plane']):
-        planar, _ = _collect_planar_enclosed_face(mesh, topology, cycle, tolerances)
-    if curved is not None and planar is not None:
-        if curved['faces'] <= planar['faces']:
-            return planar, 'ok'
-        if planar['faces'] <= curved['faces']:
-            return curved, 'ok'
-        return None, 'ambiguous_enclosure_certificates'
-    if curved is not None:
-        return curved, 'ok'
-    if planar is not None:
-        return planar, 'ok'
-    return None, reason
-
-
-def _select_outermost_enclosed_region(regions, edge):
-    """Keep maximal face sets by containment and reject overlapping incomparable regions."""
-    unique = {}
-    for region in regions:
-        unique[frozenset(region['faces'])] = region
-    regions = list(unique.values())
-    maximal = [
-        region
-        for region in regions
-        if not any(region['faces'] < other['faces'] for other in regions)
-    ]
-    for i, region in enumerate(maximal):
-        for other in maximal[i + 1 :]:
-            if region['faces'] & other['faces']:
-                return [], 'crossing_enclosed_regions'
-    return maximal, 'ok' if maximal else 'no_unambiguous_enclosing_region'
-
-
-def _propose_enclosed_region_collapse(
-    mesh, topology, edge, regions, features, boundary, reference, parameters, deletion_evidence
-):
-    """Combine complete certified-region removal with each permitted endpoint collapse."""
-    if not _deletion_phase_allowed(deletion_evidence['iteration_index'], parameters['max_iter']):
-        return []
-    enclosed = set().union(*(r['faces'] for r in regions))
-    results = []
-    for ordinary in _propose_edge_collapse(
-        mesh, topology, edge, features, boundary, reference, parameters
-    ):
-        survivor = ordinary['survivor']
-        plan = _plan_collapse_face(mesh, topology, edge, survivor)
-        replacement_faces, normal_references = [], []
-        for face_id, triangle in zip(plan['original_face_ids'], plan['replacement_faces']):
-            if face_id not in enclosed:
-                replacement_faces.append(triangle)
-                normal_references.append(topology['normals'][face_id])
-        edit = _proposal(
-            topology,
-            'enclosed_region_collapse',
-            edge=edge,
-            remove=enclosed | plan['affected_face_ids'],
-            add=replacement_faces,
-            positions=ordinary['positions'],
-            retired=ordinary['retired'],
-            normal_refs=normal_references,
-        )
-        edit.update(
-            survivor=survivor,
-            enclosed_faces=enclosed,
-            regions=regions,
-            deletion_evidence=dict(deletion_evidence),
-            iteration_index=deletion_evidence['iteration_index'],
-        )
-        results.append(edit)
-    return results
-
-
-def _validate_enclosed_region_collapse(
-    mesh, topology, edit, features, boundary, reference, parameters, tolerances
-):
-    """Recheck current repair evidence, phase permission, certificates, and deletion scope."""
-    evidence = edit.get('deletion_evidence', {})
-    if (
-        evidence.get('revision') != topology['revision']
-        or not evidence.get('repair_failure')
-        or not _deletion_phase_allowed(evidence.get('iteration_index', -1), parameters['max_iter'])
-    ):
-        return False, 'deletion_not_permitted'
-    if not _classify_collapse_neighborhood(mesh, topology, edit['edge'], features, boundary)[
-        'problematic'
-    ]:
-        return False, 'no_longer_problematic'
-    for region in edit['regions']:
-        if region['revision'] != topology['revision']:
-            return False, 'stale_enclosure'
-        current, reason = _collect_enclosed_face(mesh, topology, region['cycle'], tolerances)
-        if current is None or current['faces'] != region['faces']:
-            return False, 'enclosure_certificate_changed'
-    expected = set().union(*(r['faces'] for r in edit['regions']))
-    if expected != edit['enclosed_faces'] or not expected <= edit['remove_faces']:
-        return False, 'incorrect_deletion_scope'
-    endpoint_faces = set().union(*(topology['vertex_to_faces'][v] for v in edit['edge']))
-    if edit['remove_faces'] != expected | endpoint_faces:
-        return False, 'unrelated_face_deletion'
-    return True, 'ok'
+            refusal = f'replacement_{reason}'
+        if not progress:
+            return replaced, refusal
 
 
 # Mesh quality and relaxation stages
 
 
-def _equalize_valence(mesh, topology, features, boundary, reference, parameters, tolerances):
-    """Accept flips that reduce deviation from boundary/interior target valences."""
-    accepted_count = 0
+def _equalize_valence(mesh, topology, features, boundary, parameters, tolerances):
+    """Flip edges to bring each vertex closer to its target valence.
+
+    The valence of a vertex is the number of edges at it. The target is 6 inside the surface
+    and 4 on the boundary. A flip is kept only if it lowers the total deviation from the target
+    for the four vertices involved and passes validation.
+    """
     for edge in _collect_candidate_edge(
-        mesh, topology, parameters, boundary_only=False, operation='flip'
+        topology, parameters, boundary_only=False, operation='flip'
     ):
-        edit = _propose_edge_flip(mesh, topology, edge, features)
+        edit = _propose_edge_flip(topology, edge, features)
         if edit is None:
             continue
         opposite = sorted({v for f in edit['add_faces'] for v in f} - set(edge))
@@ -2318,19 +2337,14 @@ def _equalize_valence(mesh, topology, features, boundary, reference, parameters,
             >= np.abs(vertex_degrees - target_degrees).sum()
         ):
             continue
-        valid, _ = _validate_edit(
-            mesh, topology, edit, features, boundary, reference, parameters, tolerances
-        )
+        valid, _ = _validate_edit(mesh, topology, edit, features, boundary, parameters, tolerances)
         if valid:
-            _commit_edit(mesh, topology, edit, features, boundary)
-            accepted_count += 1
-    return accepted_count
+            _commit_edit(mesh, topology, edit, boundary)
 
 
-def _improve_triangle_angle(mesh, topology, features, boundary, reference, parameters, tolerances):
-    """Try flips opposite angles over 120 degrees and retain only valid improvements."""
-    accepted_count = 0
-    # Edge keys survive unrelated face-row swaps; never queue volatile face indices.
+def _improve_triangle_angle(mesh, topology, features, boundary, parameters, tolerances):
+    """Flip the edge opposite any angle over 120 degrees, if that reduces the largest angle."""
+    # Queue edges, not face IDs, because face IDs can change as edits are applied.
     candidates = set()
     for face_id, angles in topology['angles'].items():
         if angles.max() > 2 * math.pi / 3:
@@ -2340,7 +2354,7 @@ def _improve_triangle_angle(mesh, topology, features, boundary, reference, param
                 _edge(triangle[(corner_index + 1) % 3], triangle[(corner_index + 2) % 3])
             )
     for edge in sorted(candidates):
-        edit = _propose_edge_flip(mesh, topology, edge, features)
+        edit = _propose_edge_flip(topology, edge, features)
         if edit is None:
             continue
         old_max_angle = max(
@@ -2349,22 +2363,111 @@ def _improve_triangle_angle(mesh, topology, features, boundary, reference, param
         _, _, angles = _geometry(_candidate_point(topology, edit, edit['add_faces']))
         if angles.max() >= old_max_angle - 1e-12:
             continue
-        valid, _ = _validate_edit(
-            mesh, topology, edit, features, boundary, reference, parameters, tolerances
-        )
+        valid, _ = _validate_edit(mesh, topology, edit, features, boundary, parameters, tolerances)
         if valid:
-            _commit_edit(mesh, topology, edit, features, boundary)
-            accepted_count += 1
-    return accepted_count
+            _commit_edit(mesh, topology, edit, boundary)
+
+
+COVERAGE_SAMPLES_PER_TARGET_AREA = 100
+TANGENTIAL_FINAL_ITERATIONS = 2
+TANGENTIAL_MIN_NORMAL_AGREEMENT = 0.8
+
+
+def coverage_iteration_count(max_iter):
+    """Return how many iterations use coverage-based smoothing, at least one."""
+    return max(1, max_iter - TANGENTIAL_FINAL_ITERATIONS)
+
+
+def coverage_samples(reference, parameters):
+    """Sample the source surface once, evenly by area."""
+    if 'coverage_samples' not in reference:
+        node = _as_numpy(reference['mesh'].node).reshape(-1, 3)
+        element = _as_numpy(reference['mesh'].element).reshape(-1, 3)
+        cross = np.cross(
+            node[element[:, 1]] - node[element[:, 0]], node[element[:, 2]] - node[element[:, 0]]
+        )
+        double_area = np.linalg.norm(cross, axis=1)
+        target = parameters['target_edge_length']
+        count = COVERAGE_SAMPLES_PER_TARGET_AREA * double_area.sum() / 2 / target**2
+        count = int(np.clip(count, 2000, 200000))
+        generator = np.random.default_rng(0)
+        chosen = generator.choice(len(element), count, p=double_area / double_area.sum())
+        random = generator.random((count, 2))
+        root = np.sqrt(random[:, 0])
+        reference['coverage_samples'] = (
+            (1 - root)[:, None] * node[element[chosen, 0]]
+            + (root * (1 - random[:, 1]))[:, None] * node[element[chosen, 1]]
+            + (root * random[:, 1])[:, None] * node[element[chosen, 2]]
+        )
+    return reference['coverage_samples']
+
+
+def coverage_smoothing_positions(mesh, topology, reference, parameters):
+    """Return where coverage-based smoothing (Lloyd relaxation) moves each vertex that owns samples.
+
+    The source surface is divided among the vertices by giving each sample to its closest vertex,
+    and each vertex moves to the centre of its samples. Unlike an average of neighbors, this
+    measures how much of the source each vertex represents, so vertices can't cluster or retreat
+    from a tip without another vertex's share growing and pulling them back.
+    """
+    from scipy.spatial import cKDTree
+
+    points = coverage_samples(reference, parameters)
+    active = np.array([v for v in range(len(mesh.node)) if topology['vertex_to_faces'][v]])
+    _, owner = cKDTree(topology['vertex_positions'][active]).query(points)
+    counts = np.bincount(owner, minlength=len(active))
+    centers = np.stack(
+        [np.bincount(owner, weights=points[:, axis], minlength=len(active)) for axis in range(3)],
+        axis=1,
+    )
+    return {int(active[i]): centers[i] / counts[i] for i in range(len(active)) if counts[i]}
+
+
+def tangential_smoothing_position(topology, vertex_id, neighbors):
+    """Return an interior vertex's smoothed position, or None if it shouldn't slide.
+
+    Tangential smoothing starts from the average of the neighbors and removes the part of the
+    move along the vertex normal, so the vertex slides within its tangent plane. The vertex normal
+    is the sum of the area-weighted normals of the vertex's faces. If they agree less than
+    TANGENTIAL_MIN_NORMAL_AGREEMENT, the vertex is on a sharp crease or corner, or has no tangent
+    plane because they cancel, and it stays where it is.
+    """
+    position = topology['vertex_positions'][vertex_id]
+    average = topology['vertex_positions'][neighbors].mean(axis=0)
+    face_ids = topology['vertex_to_faces'][vertex_id]
+    area_normal = sum(topology['areas'][face_id] * topology['normals'][face_id] for face_id in face_ids)
+    length = float(np.linalg.norm(area_normal))
+    if length < TANGENTIAL_MIN_NORMAL_AGREEMENT * sum(topology['areas'][f] for f in face_ids):
+        return None
+    normal = area_normal / length
+    return average - normal * float((average - position) @ normal)
 
 
 def _relax_vertex(
-    mesh, topology, features, boundary, reference, parameters, tolerances, *, boundary_only
+    mesh,
+    topology,
+    features,
+    boundary,
+    reference,
+    parameters,
+    tolerances,
+    *,
+    boundary_only,
+    use_coverage=False,
 ):
-    """Move eligible vertices toward neighborhood averages, with optional source projection."""
+    """Smooth the interior vertices, or the boundary vertices if boundary_only is set.
+
+    By default, an interior vertex moves to the average of its neighbors. With
+    flag_use_coverage_then_tangential, it moves by coverage-based smoothing if use_coverage is
+    set and it owns samples, and otherwise by tangential smoothing. A boundary vertex moves to the
+    average of itself and its two boundary neighbors. The new position is then projected, if
+    projection is on. Protected vertices don't move, and each move must pass validation.
+    """
     if boundary_only and not parameters['flag_process_boundary']:
-        return 0
-    accepted_count = 0
+        return
+    centers = {}
+    if use_coverage and not boundary_only:
+        centers = coverage_smoothing_positions(mesh, topology, reference, parameters)
     for vertex_id in range(len(mesh.node)):
         if (
             vertex_id in features['points']
@@ -2376,8 +2479,8 @@ def _relax_vertex(
             neighbors = sorted(topology['boundary_neighbors'][vertex_id])
             if len(neighbors) != 2:
                 continue
-            # New boundaries have no original boundary-curve support. Do not snap
-            # them onto an unrelated loop; without projection raw smoothing is legal.
+            # A vertex with no boundary label has no original boundary curve to project onto, so
+            # don't move it onto an unrelated one. Without projection, plain smoothing is fine.
             if parameters['flag_project_to_source_mesh'] and vertex_id not in boundary['labels']:
                 continue
             candidate = (
@@ -2388,15 +2491,22 @@ def _relax_vertex(
             neighbors = sorted(topology['vertex_neighbors'][vertex_id])
             if len(neighbors) < 3:
                 continue
-            # Keep unresolved junction geometry until an explicit repair can handle it.
+            # Leave a vertex alone if any of its edges has more than two faces.
             if any(
                 len(topology['edge_to_faces'][_edge(vertex_id, neighbor_id)]) > 2
                 for neighbor_id in neighbors
             ):
                 continue
-            candidate = topology['vertex_positions'][neighbors].mean(axis=0)
+            if parameters['flag_use_coverage_then_tangential']:
+                candidate = centers.get(vertex_id)
+                if candidate is None:
+                    candidate = tangential_smoothing_position(topology, vertex_id, neighbors)
+                if candidate is None:
+                    continue
+            else:
+                candidate = topology['vertex_positions'][neighbors].mean(axis=0)
         point = _propose_vertex_move(
-            mesh, vertex_id, candidate, features, boundary, reference, parameters
+            vertex_id, candidate, features, boundary, reference, parameters
         )
         if (
             point is None
@@ -2405,13 +2515,9 @@ def _relax_vertex(
         ):
             continue
         edit = _proposal(topology, 'move', positions={vertex_id: point})
-        valid, _ = _validate_edit(
-            mesh, topology, edit, features, boundary, reference, parameters, tolerances
-        )
+        valid, _ = _validate_edit(mesh, topology, edit, features, boundary, parameters, tolerances)
         if valid:
-            _commit_edit(mesh, topology, edit, features, boundary)
-            accepted_count += 1
-    return accepted_count
+            _commit_edit(mesh, topology, edit, boundary)
 
 
 # Output validation and compaction
@@ -2420,25 +2526,34 @@ def _relax_vertex(
 def _validate_result(
     mesh, topology, reference, parameters, features, boundary, tolerances, *, old_to_new_vertex=None
 ):
-    """Check output geometry, protected features/boundaries, and authorized deletion history."""
-    _validate_mesh(mesh, topology, tolerances, allow_empty=True)
+    """Check the finished mesh, and raise an error if it fails.
+
+    It must be a valid mesh, keep its protected features and boundaries, have no replacement
+    outside the rules, and still have faces if the source had any.
+    """
+    _validate_mesh(topology, tolerances, allow_empty=True)
     for locks in (features, boundary['frozen']):
         valid, reason = _check_feature_constraint(
             mesh, topology, locks, old_to_new_vertex=old_to_new_vertex
         )
         if not valid:
-            raise RuntimeError(f'output constraint violation: {reason}')
-    for record in topology['deletions']:
-        if not record['repair_failure'] or not _deletion_phase_allowed(
+            raise RuntimeError(f'output breaks a protected feature or boundary: {reason}')
+    for record in topology['replacements']:
+        if not record['repair_failure'] or not _replacement_phase_allowed(
             record['iteration'] - 1, parameters['max_iter']
         ):
-            raise RuntimeError('invalid deletion phase in accepted-edit ledger')
-    if not len(mesh.element) and reference['summary']['faces'] and not topology['deletions']:
-        raise RuntimeError('all source faces disappeared without authorized region deletion')
+            raise RuntimeError(
+                'a recorded replacement has no failed repair or is outside the late iterations'
+            )
+    if not len(mesh.element) and reference['summary']['faces']:
+        raise RuntimeError('all source faces disappeared')
 
 
 def _compact_mesh(mesh, features):
-    """Use library submesh extraction; retain protected isolated points explicitly."""
+    """Remove unused vertices and renumber the rest, keeping protected points that have no faces.
+
+    Returns (output, old_to_new_vertex).
+    """
     if len(mesh.element):
         output, retained_vertex_ids = mesh.get_sub_mesh(
             list(range(len(mesh.element))), return_node_idx_list=True
@@ -2468,7 +2583,7 @@ def _compact_mesh(mesh, features):
 def _finalize_output(
     mesh, topology, source_mesh, reference, parameters, features, boundary, tolerances
 ):
-    """Compact, restore source dtype/device, and revalidate after coordinate casting."""
+    """Check the result, renumber it, restore the source data type and device, and check again."""
     _validate_result(mesh, topology, reference, parameters, features, boundary, tolerances)
     protected = dict(features)
     protected['points'] = features['points'] | boundary['frozen']['points']
@@ -2476,16 +2591,11 @@ def _finalize_output(
     output.node = output.node.to(
         dtype=source_mesh.node.dtype, device=source_mesh.node.device
     ).clone()
-    device = (
-        source_mesh.element.device
-        if torch.is_tensor(source_mesh.element)
-        else source_mesh.node.device
-    )
-    output.element = output.element.to(dtype=torch.int64, device=device).clone()
-    # Recheck after casting: float32 output can otherwise hide new degeneracy.
+    output.element = output.element.to(dtype=torch.int64, device=source_mesh.node.device).clone()
+    # Check again after the conversion: rounding to float32 can create degenerate triangles.
     check = _copy_source_mesh(output)
     checked = _initialize_topology(check)
-    checked['deletions'] = topology['deletions']
+    checked['replacements'] = topology['replacements']
     _validate_result(
         check,
         checked,

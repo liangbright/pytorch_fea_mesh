@@ -9,18 +9,46 @@ from ..mesh.tri6_mesh import Tri6Mesh
 from ..mesh.quad_mesh import QuadMesh
 from ..mesh.quad_triangle_mesh import QuadTriangleMesh
 from copy import deepcopy
+from .mesh_processing import convert_smoother_mask, remove_unused_node
 from .mesh_processing import simple_smoother, simple_smoother_for_mesh, trace_polyline, is_edge_curve_closed, is_node_curve_closed, merge_mesh, find_connected_region, find_nearest_node, segment_mesh_to_connected_region, find_neighbor_node
 from ..utility.geometry_utility import cal_angle_between_3d_vector
 from .mesh_processing import SimpleSmoother, SimpleSmootherForMesh, TracePolyline, IsEdgeCurveClosed, IsNodeCurveClosed, MergeMesh, FindConnectedRegion, FindNearestNode, SegmentMeshToConnectedRegion, FindNeighborNode
 from ..utility.geometry_utility import ComputeAngleBetweenTwoVectorIn3D
 try:
     import vtk
-except:
-    print("cannot import vtk")
+except Exception as e:
+    # vtk is optional, so a failed import only turns off the vtk-based functions
+    print('cannot import vtk: '+str(e))
 #%%
-def trace_mesh_boundary_curve(mesh, start_node_idx, next_node_idx=None, end_node_idx=None):
+def check_mesh_has_linear_element(mesh_vtk):
+    #a vtk filter that needs vtkPolyData only logs an error on other input, and its output is empty
+    #a mesh with quadratic elements, such as a Tri6Mesh, converts to vtkUnstructuredGrid
+    if not isinstance(mesh_vtk, vtk.vtkPolyData):
+        raise ValueError('this function works only on a surface mesh with linear elements, but the mesh converts to '
+                         +mesh_vtk.GetClassName()+'. A Tri6Mesh can use subdivide_to_tri3 first')
+#%%
+def find_next_node_by_element_orientation(mesh, start_node_idx, boundary_edge):
+    #return the node after start_node_idx on the boundary, in the direction of the element's node order
+    if 'tri6' in mesh.mesh_type or 'quad8' in mesh.mesh_type:
+        raise NotImplementedError('element orientation requires linear polygon elements')
+    if mesh.edge_to_element_adj_table is None:
+        mesh.build_edge_to_element_adj_table()
+    for edge_idx in mesh.node_to_edge_adj_table[start_node_idx]:
+        if edge_idx in boundary_edge:
+            idx0, idx1=mesh.edge[edge_idx].tolist()
+            other_idx=idx1 if idx0 == start_node_idx else idx0
+            elm=mesh.copy_to_list(mesh.element[mesh.edge_to_element_adj_table[edge_idx][0]])
+            elm=[int(idx) for idx in elm]
+            if elm[(elm.index(start_node_idx)+1) % len(elm)] == other_idx:
+                return other_idx
+    raise ValueError('no boundary edge starts at node('+str(start_node_idx)+') in the direction of its element')
+#%%
+def trace_mesh_boundary_curve(mesh, start_node_idx, next_node_idx=None, end_node_idx=None, follow_element_orientation=False):
     #trace boundary starting from start_node_idx -> next_node_idx -> ...
     #this function may not work well if two boundary curves share points
+    #if next_node_idx is None, the direction is decided by the first boundary edge found at start_node_idx,
+    #which depends on node numbering, unless follow_element_orientation is True:
+    #then the curve follows the node order of the elements next to it
     if not isinstance(mesh, PolygonMesh):
         raise NotImplementedError
     #---------
@@ -36,9 +64,14 @@ def trace_mesh_boundary_curve(mesh, start_node_idx, next_node_idx=None, end_node
         mesh.build_node_to_edge_adj_table()
     #---------
     boundary_node, boundary_edge=mesh.find_boundary_node_and_edge()
+    boundary_node=set(boundary_node)
+    boundary_edge=set(boundary_edge)
+    edge=mesh.edge.detach().cpu().numpy().tolist()
     BoundaryCurve=[]
     if start_node_idx not in boundary_node:
         raise ValueError('start_node('+str(start_node_idx)+') is not a boundary node')
+    if next_node_idx is None and follow_element_orientation == True:
+        next_node_idx=find_next_node_by_element_orientation(mesh, start_node_idx, boundary_edge)
     if next_node_idx is not None:
         if next_node_idx not in boundary_node:
             raise ValueError('next_node('+str(next_node_idx)+') is not a boundary node')
@@ -54,32 +87,36 @@ def trace_mesh_boundary_curve(mesh, start_node_idx, next_node_idx=None, end_node
             #return BoundaryCurve
     #---------
     idx_next=start_node_idx
+    visited=set(BoundaryCurve)
     while True:
         BoundaryCurve.append(idx_next)
+        visited.add(idx_next)
         if idx_next == end_node_idx:
             break
         edge_idx_list=mesh.node_to_edge_adj_table[idx_next]
         flag=False
         for edge_idx in edge_idx_list:
             if edge_idx in boundary_edge:
-                idx_list=mesh.edge[edge_idx].tolist()
+                idx_list=edge[edge_idx]
                 if idx_next == idx_list[0]:
                     node_idx=idx_list[1]
                 elif idx_next == idx_list[1]:
                     node_idx=idx_list[0]
                 else:
                     raise ValueError('something is wrong in edge and node_to_edge_adj_table')
-                if node_idx not in BoundaryCurve:
+                if node_idx not in visited:
                     idx_next=node_idx
                     flag=True
                     break
         if flag == False:
             break
+    if (end_node_idx is not None) and (BoundaryCurve[-1] != end_node_idx):
+        print("warning: BoundaryCurve[-1] != end_node_idx @ TraceMeshBoundaryCurve")
     return BoundaryCurve
 #%% old name
 TraceMeshBoundaryCurve=trace_mesh_boundary_curve
 #%%
-def find_mesh_boundary_curve(mesh):
+def find_mesh_boundary_curve(mesh, follow_element_orientation=False):
     if not isinstance(mesh, PolygonMesh):
         raise NotImplementedError
     node_idx_list=mesh.find_boundary_node()
@@ -87,7 +124,7 @@ def find_mesh_boundary_curve(mesh):
     while True:
         if len(node_idx_list) == 0:
             break
-        BoundaryCurve=TraceMeshBoundaryCurve(mesh, node_idx_list[0])
+        BoundaryCurve=TraceMeshBoundaryCurve(mesh, node_idx_list[0], follow_element_orientation=follow_element_orientation)
         BoundaryCurveList.append(BoundaryCurve)
         node_idx_list=list(set(node_idx_list)-set(BoundaryCurve))
     return BoundaryCurveList
@@ -184,7 +221,6 @@ def merge_mesh_on_boundary(mesh_list, distance_threshold):
         merged_mesh=merge_mesh(merged_mesh, merged_mesh.find_boundary_node(),
                                mesh_n, mesh_n.find_boundary_node(),
                                distance_threshold)
-        merged_mesh=PolygonMesh(merged_mesh.node, merged_mesh.element)
     return merged_mesh
 #%% old name
 MergeMeshOnBoundary=merge_mesh_on_boundary
@@ -192,6 +228,8 @@ MergeMeshOnBoundary=merge_mesh_on_boundary
 def simple_smoother_for_mesh_node_normal(mesh, lamda, mask, n_iter, update_node_normal=True, eps=None):
     if not isinstance(mesh, PolygonMesh):
         raise NotImplementedError
+    if not isinstance(mesh, (TriangleMesh, QuadMesh, Tri6Mesh, QuadTriangleMesh)):
+        raise TypeError('a plain PolygonMesh has no normals. Use TriangleMesh, QuadMesh, Tri6Mesh or QuadTriangleMesh')
     if eps is None:
         if mesh.node.dtype in (torch.float32, torch.float64):
             eps=1e-12
@@ -200,11 +238,13 @@ def simple_smoother_for_mesh_node_normal(mesh, lamda, mask, n_iter, update_node_
     if update_node_normal == True:
         mesh.update_node_normal(eps=eps)
     node_normal=mesh.node_normal
+    if node_normal is None:
+        raise ValueError('mesh.node_normal is None: call update_node_normal or pass update_node_normal=True')
     if mesh.node_to_node_adj_link is None:
         mesh.build_node_to_node_adj_link()
-    adj_link=mesh.node_to_node_adj_link
+    adj_link=mesh.node_to_node_adj_link.to(node_normal.device)
     for n in range(0, n_iter):
-        simple_smoother(node_normal, adj_link, lamda, mask, inplace=True)
+        node_normal=simple_smoother(node_normal, adj_link, lamda, mask, inplace=False)
         normal_norm=norm(node_normal, ord=2, dim=1, keepdim=True)
         normal_norm=normal_norm.clamp_min(eps)
         node_normal=node_normal/normal_norm
@@ -216,19 +256,23 @@ SimpleSmootherForMeshNodeNormal=simple_smoother_for_mesh_node_normal
 def simple_smoother_for_mesh_element_normal(mesh, lamda, mask, n_iter, update_element_normal=True, eps=None):
     if not isinstance(mesh, PolygonMesh):
         raise NotImplementedError
+    if not isinstance(mesh, (TriangleMesh, QuadMesh, Tri6Mesh, QuadTriangleMesh)):
+        raise TypeError('a plain PolygonMesh has no normals. Use TriangleMesh, QuadMesh, Tri6Mesh or QuadTriangleMesh')
     if eps is None:
         if mesh.node.dtype in (torch.float32, torch.float64):
             eps=1e-12
         else:
             raise NotImplementedError()
     if update_element_normal == True:
-        mesh.update_element_area_and_normal(eps=eps)
+        mesh.update_element_normal(eps=eps)
     element_normal =mesh.element_normal 
+    if element_normal is None:
+        raise ValueError('mesh.element_normal is None: call update_element_normal or pass update_element_normal=True')
     if mesh.element_to_element_adj_link['node'] is None:
         mesh.build_element_to_element_adj_link('node')
-    adj_link=mesh.element_to_element_adj_link['node']
+    adj_link=mesh.element_to_element_adj_link['node'].to(element_normal.device)
     for n in range(0, n_iter):
-        simple_smoother(element_normal, adj_link, lamda, mask, inplace=True)
+        element_normal=simple_smoother(element_normal, adj_link, lamda, mask, inplace=False)
         normal_norm=norm(element_normal, ord=2, dim=1, keepdim=True)
         normal_norm=normal_norm.clamp_min(eps)
         element_normal=element_normal/normal_norm
@@ -251,10 +295,11 @@ def simple_smoother_for_quad_mesh(mesh, lamda, mask, n_iter):
             if idx != n:
                 adj_link.append([idx, n])
                 adj_link.append([n, idx])
-    adj_link=torch.tensor(adj_link, dtype=torch.int64)
+    adj_link=torch.tensor(adj_link, dtype=torch.int64, device=mesh.node.device).reshape(-1,2)#(0,2) if there is no link
     adj_link=torch.unique(adj_link, dim=0, sorted=True)
     for n in range(0, n_iter):
         simple_smoother(mesh.node, adj_link, lamda, mask, inplace=True)
+    mesh.clear_geometry_derived_data(clear_adjacency_data=False)
 #%% old name
 SimpleSmootherForQuadMesh=simple_smoother_for_quad_mesh
 #%%
@@ -264,8 +309,11 @@ SimpleSmootherForQuadMesh=simple_smoother_for_quad_mesh
 def cut_mesh_by_curve(mesh, curve, point_ref, straight_cut=False, return_unselected=False, 
                       clean_output=False, eps=1e-5, triangulate_output=False, mesh_vtk=None, dtype=None,
                       threshold=0):
+    #only for meshes with linear elements
+    #if straight_cut is False and clean_output is False, the outputs keep all nodes of the input and their indexes
     if mesh_vtk is None:
         mesh_vtk=mesh.convert_to_vtk()
+    check_mesh_has_linear_element(mesh_vtk)
     if dtype is None:
         if mesh is not None:
             dtype=mesh.node.dtype
@@ -364,6 +412,8 @@ def project_point_to_mesh(point, mesh, mesh_vtk=None, dtype=None, cell_locator_v
             dtype=mesh.node.dtype
         else:
             raise ValueError('dtype is unknown')
+    #the output is on the device of point, or of mesh if point is a numpy array
+    device=mesh.node.device if (mesh is not None and mesh.node is not None) else None
     #------------------------------------------
     if torch.is_tensor(point) or isinstance(point, np.ndarray):
         if len(point.shape) == 1:
@@ -374,6 +424,11 @@ def project_point_to_mesh(point, mesh, mesh_vtk=None, dtype=None, cell_locator_v
             raise ValueError('point.shape is not supported')
     else:
         raise ValueError('point can only be torch.tensor or np.ndarray')
+    if torch.is_tensor(point):
+        device=point.device
+        point=point.detach().cpu().numpy()
+    if len(point) > 0 and mesh_vtk.GetNumberOfCells() == 0:
+        raise ValueError('cannot project a point to a mesh with no elements')
     #------------------------------------------
     if cell_locator_vtk is None:
         CellLocator=vtk.vtkStaticCellLocator()
@@ -384,7 +439,7 @@ def project_point_to_mesh(point, mesh, mesh_vtk=None, dtype=None, cell_locator_v
     point_proj=[]
     element_proj=[]
     for k in range(0, len(point)):
-        testPoint=[float(point[k][0]), float(point[k][1]), float(point[k][2])]
+        testPoint=point[k].tolist()
         closestPoint=[0, 0, 0] #the coordinates of the closest point will be returned here
         closestPointDist2=vtk.reference(0) #the squared distance to the closest point will be returned here
         cellId=vtk.reference(0); #the cell id of the cell containing the closest point will be returned here
@@ -392,7 +447,7 @@ def project_point_to_mesh(point, mesh, mesh_vtk=None, dtype=None, cell_locator_v
         CellLocator.FindClosestPoint(testPoint, closestPoint, cellId, subId, closestPointDist2);
         point_proj.append(closestPoint)
         element_proj.append(int(cellId))
-    point_proj=torch.tensor(point_proj, dtype=dtype)
+    point_proj=torch.tensor(point_proj, dtype=dtype, device=device).reshape(-1,3)#(0,3) if there is no point
     return point_proj, element_proj
 #%% old name
 ProjectPointToMesh=project_point_to_mesh
@@ -401,6 +456,8 @@ def smooth_and_project(mesh_move, mesh_fixed, lamda, mask, n1_iter, n2_iter, mes
     #smooth mesh_move and project it to mesh_fixed
     #mesh_move.node is modified
     #mesh_fixed must be a triangle mesh
+    #mask: same as in simple_smoother; only nodes with mask > 0 are projected
+    mask=convert_smoother_mask(mask, mesh_move.node)
     if mesh_fixed_vtk is None:
         mesh_fixed_vtk=mesh_fixed.convert_to_vtk()
     fixed_cell_locator_vtk=None
@@ -412,8 +469,12 @@ def smooth_and_project(mesh_move, mesh_fixed, lamda, mask, n1_iter, n2_iter, mes
         if smooth_first == True:
             simple_smoother_for_mesh(mesh_move, lamda, mask, n1_iter)
         node_proj, element_proj=project_point_to_mesh(mesh_move.node, mesh_fixed, mesh_fixed_vtk, cell_locator_vtk=fixed_cell_locator_vtk)        
-        temp=mask.view(-1)
-        mesh_move.node[temp>0]=node_proj[temp>0]
+        if torch.is_tensor(mask):
+            temp=mask.view(-1)
+            mesh_move.node[temp>0]=node_proj[temp>0]
+        else:
+            mesh_move.node[:]=node_proj
+        mesh_move.clear_geometry_derived_data(clear_adjacency_data=False)
         if smooth_first == False and k < n2_iter-1:
             simple_smoother_for_mesh(mesh_move, lamda, mask, n1_iter)
 #%% old name
@@ -449,6 +510,7 @@ MeshToMeshDistance=cal_mesh_to_mesh_distance
 def convert_polygon_mesh_to_triangle_mesh(mesh, mesh_vtk=None, dtype=None):
     if mesh_vtk is None:
         mesh_vtk=mesh.convert_to_vtk()
+    check_mesh_has_linear_element(mesh_vtk)
     if dtype is None:
         if mesh is not None:
             dtype=mesh.node.dtype
@@ -465,12 +527,18 @@ def convert_polygon_mesh_to_triangle_mesh(mesh, mesh_vtk=None, dtype=None):
 #%%
 ConvertPolygonMeshToTriangleMesh=convert_polygon_mesh_to_triangle_mesh
 #%%
+def remove_unused_node_of_clip_output(mesh):
+    #with two outputs, vtkClipPolyData gives both of them all points, used or not
+    if mesh.node is not None:
+        remove_unused_node(mesh)
+#%%
 def clip_mesh_by_plane(mesh, origin, normal, return_clipped_output=False, clean_output=False, eps=1e-5,
                        triangulate_output=False, mesh_vtk=None, dtype=None):
     #origin and normal define the cut plane
     #Outputs with no cells are empty meshes (node=None, element=None).
     if mesh_vtk is None:
         mesh_vtk=mesh.convert_to_vtk()
+    check_mesh_has_linear_element(mesh_vtk)
     if dtype is None:
         if mesh is not None:
             dtype=mesh.node.dtype
@@ -519,6 +587,9 @@ def clip_mesh_by_plane(mesh, origin, normal, return_clipped_output=False, clean_
             clipped_output_mesh.read_mesh_vtk(clipped_output_vtk, dtype)
     else:
         clipped_output_mesh=convert_polygon_mesh_to_triangle_mesh(None, clipped_output_vtk, dtype)
+    if clean_output == False:
+        remove_unused_node_of_clip_output(output_mesh)
+        remove_unused_node_of_clip_output(clipped_output_mesh)
     return output_mesh, clipped_output_mesh
 #%% old name
 ClipMeshByPlane=clip_mesh_by_plane
@@ -535,6 +606,7 @@ def clip_mesh_by_node_attribute(mesh, attribute_threshold, attribute_name=None, 
         if mesh is None:
             raise ValueError('mesh or mesh_vtk is required')
         mesh_vtk=mesh.convert_to_vtk()
+    check_mesh_has_linear_element(mesh_vtk)
     if dtype is None:
         if mesh is not None:
             dtype=mesh.node.dtype
@@ -586,6 +658,9 @@ def clip_mesh_by_node_attribute(mesh, attribute_threshold, attribute_name=None, 
             clipped_output_mesh.read_mesh_vtk(clipped_output_vtk, dtype)
     else:
         clipped_output_mesh=convert_polygon_mesh_to_triangle_mesh(None, clipped_output_vtk, dtype)
+    if clean_output == False:
+        remove_unused_node_of_clip_output(output_mesh)
+        remove_unused_node_of_clip_output(clipped_output_mesh)
     return output_mesh, clipped_output_mesh
 #%%
 ClipMeshByNodeAttribute=clip_mesh_by_node_attribute
@@ -632,15 +707,22 @@ SliceMeshByPlane=slice_mesh_by_plane
 def cal_curvature(mesh, curvature_name='mean', mesh_vtk=None, dtype=None):
     if mesh_vtk is None:
         mesh_vtk=mesh.convert_to_vtk()
+    check_mesh_has_linear_element(mesh_vtk)
     if dtype is None:
         if mesh is not None:
             dtype=mesh.node.dtype
         else:
             raise ValueError('dtype is unknown')
+    #vtkCurvatures handles only triangles: on quads its mean curvature is 1.5 times too large
+    #and its Gaussian curvature is meaningless. vtkTriangleFilter keeps the node indexes.
+    trifilter=vtk.vtkTriangleFilter()
+    trifilter.SetInputData(mesh_vtk)
+    trifilter.Update()
     cc = vtk.vtkCurvatures()
-    cc.SetInputData(mesh_vtk)
-    if 'gaussian' in curvature_name.lower():
-        curvature_name='Gaussian_Curvature'
+    cc.SetInputData(trifilter.GetOutput())
+    #the names of the output arrays are the ones vtkCurvatures uses
+    if 'gauss' in curvature_name.lower():
+        curvature_name='Gauss_Curvature'
         cc.SetCurvatureTypeToGaussian()
         cc.Update()
     elif 'mean' in curvature_name.lower():
@@ -648,16 +730,19 @@ def cal_curvature(mesh, curvature_name='mean', mesh_vtk=None, dtype=None):
         cc.SetCurvatureTypeToMean()
         cc.Update()
     elif 'max' in curvature_name.lower():
-        curvature_name='Max_Curvature'
+        curvature_name='Maximum_Curvature'
         cc.SetCurvatureTypeToMaximum()
         cc.Update()
     elif 'min' in curvature_name.lower():
-        curvature_name='Min_Curvature'
+        curvature_name='Minimum_Curvature'
         cc.SetCurvatureTypeToMinimum()
         cc.Update()
     else:
         raise ValueError('uknown curvature_name'+curvature_name)
     data=cc.GetOutput().GetPointData().GetAbstractArray(curvature_name)
+    if data is None:
+        #vtkCurvatures gives no output for a mesh with no cells
+        return torch.zeros((mesh_vtk.GetNumberOfPoints(), ), dtype=dtype)
     curvature=torch.zeros((data.GetNumberOfTuples(), ), dtype=dtype)
     for i in range(0, curvature.shape[0]):
         curvature[i]=data.GetComponent(i,0)
@@ -667,8 +752,10 @@ ComputeCurvature=cal_curvature
 #%%
 def fill_hole(mesh, hole_size, clean_output=False, eps=1e-5, triangulate_output=False, mesh_vtk=None, dtype=None):
     #make a watertight mesh
+    #An output with no cells is an empty mesh (node=None, element=None).
     if mesh_vtk is None:
         mesh_vtk=mesh.convert_to_vtk()
+    check_mesh_has_linear_element(mesh_vtk)
     if dtype is None:
         if mesh is not None:
             dtype=mesh.node.dtype
@@ -695,7 +782,8 @@ def fill_hole(mesh, hole_size, clean_output=False, eps=1e-5, triangulate_output=
     output_vtk=normal_filter.GetOutput()
     if triangulate_output == False:
         output_mesh=PolygonMesh()
-        output_mesh.read_mesh_vtk(output_vtk, dtype)
+        if output_vtk.GetNumberOfCells() > 0:
+            output_mesh.read_mesh_vtk(output_vtk, dtype)
     else:
         output_mesh=convert_polygon_mesh_to_triangle_mesh(None, output_vtk, dtype)
     return output_mesh
@@ -730,8 +818,10 @@ def subdivide(mesh, n_subdivision, method='linear', mesh_vtk=None, dtype=None):
     # linear-> vtkLinearSubdivisionFilter
     # loop -> vtkLoopSubdivisionFilter
     # butterfly -> vtkButterflySubdivisionFilter
+    #An output with no cells is an empty mesh (node=None, element=None).
     if mesh_vtk is None:
         mesh_vtk=mesh.convert_to_vtk()
+    check_mesh_has_linear_element(mesh_vtk)
     if dtype is None:
         if mesh is not None:
             dtype=mesh.node.dtype
@@ -753,9 +843,10 @@ def subdivide(mesh, n_subdivision, method='linear', mesh_vtk=None, dtype=None):
         raise ValueError
     filter.SetNumberOfSubdivisions(n_subdivision)
     filter.SetInputData(mesh_vtk)
-    filter.update()
+    filter.Update()
     output_mesh=PolygonMesh()
-    output_mesh.read_mesh_vtk(filter.GetOutput(), dtype)
+    if filter.GetOutput().GetNumberOfCells() > 0:
+        output_mesh.read_mesh_vtk(filter.GetOutput(), dtype)
     return output_mesh
 #%% old name
 Subdivision=subdivide

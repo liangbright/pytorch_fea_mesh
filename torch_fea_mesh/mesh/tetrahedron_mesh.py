@@ -13,8 +13,8 @@ class TetrahedronMesh(PolyhedronMesh):
     def clear(self):
         super().clear()
 
-    def clear_geometry_derived_data(self):
-        super().clear_geometry_derived_data()
+    def clear_geometry_derived_data(self, clear_adjacency_data=True):
+        super().clear_geometry_derived_data(clear_adjacency_data)
         self.element_volume=None
 
     def build_edge(self):
@@ -33,7 +33,7 @@ class TetrahedronMesh(PolyhedronMesh):
             edge.append([id1, id2])
             edge.append([id1, id3])
             edge.append([id2, id3])
-        edge=np.array(edge, dtype=np.int64)
+        edge=np.array(edge, dtype=np.int64).reshape(-1,2)
         edge=np.sort(edge, axis=1)
         edge_unique, inverse=np.unique(edge, return_inverse=True, axis=0)
         self.edge=torch.tensor(edge_unique, dtype=torch.int64)
@@ -55,7 +55,7 @@ class TetrahedronMesh(PolyhedronMesh):
             face.append([id0, id1, id3])
             face.append([id0, id3, id2])
             face.append([id1, id2, id3])
-        face=np.array(face, dtype=np.int64)
+        face=np.array(face, dtype=np.int64).reshape(-1,3)
         face_sorted=np.sort(face, axis=1)
         face_sorted_unique, index, inverse=np.unique(face_sorted, return_index=True, return_inverse=True, axis=0)
         self.face=torch.tensor(face[index], dtype=torch.int64)
@@ -78,7 +78,7 @@ class TetrahedronMesh(PolyhedronMesh):
 
     def subdivide(self):
         #draw a 3D figure and code this...
-        pass
+        raise NotImplementedError('subdivide is not implemented for TetrahedronMesh')
 
     def get_sub_mesh(self, element_idx_list, return_node_idx_list=False):
         sub_mesh, node_idx_list=super().get_sub_mesh(element_idx_list, return_node_idx_list=True)

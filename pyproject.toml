@@ -8,11 +8,10 @@ version = "0.1.0"
 description = "PyTorch mesh containers, geometry, and processing for finite element analysis"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["numpy", "torch", "torch-scatter"]
+dependencies = ["numpy", "scipy>=1.14", "torch", "torch-scatter"]
 
 [project.optional-dependencies]
 vtk = ["vtk"]
-remeshing = ["scipy>=1.14"]
 chamfer = ["torch-geometric>=2.8", "pyg-lib>=0.6"]
 dev = ["pytest>=7", "build", "twine"]
 

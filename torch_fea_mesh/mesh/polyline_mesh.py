@@ -15,69 +15,81 @@ class PolylineMesh(Mesh):
     def clear(self):
         super().clear()
 
-    def clear_geometry_derived_data(self):
-        super().clear_geometry_derived_data()
+    def clear_geometry_derived_data(self, clear_adjacency_data=True):
+        super().clear_geometry_derived_data(clear_adjacency_data)
 
-    def initialize(self, curve_list):
-        #curve_list is a list of curves or a 3D numpy/torch array
-        #curve_list[k] is a 2D numpy/torch array or a list of points
-        if len(curve_list)==0:
-            self.clear()
-            return
-        node=[]
-        element=[]
-        dtype=None
-        for k in range(0, len(curve_list)):
-            curve=curve_list[k]
-            if torch.is_tensor(curve):
-                dtype=curve.dtype
-                curve=curve.tolist()
-            elif isinstance(curve, np.ndarray):
-                if curve.dtype == np.float64:
-                    dtype=torch.float64
-                else:
-                    dtype=torch.float32
-                curve=curve.tolist()
-            elif isinstance(curve, list) or isinstance(curve, tuple):
-                dtype=torch.float32
-            else:
-                raise ValueError("unsupported type of curve_list")
-            if len(curve) > 0:
-                idx_start=len(node)
-                node.extend(curve)
-                idx_list=np.arange(idx_start, idx_start+len(curve)).tolist()
-                for n in range(1, len(idx_list)):
-                    element.append([idx_list[n-1], idx_list[n]]) #each element is VTK_LINE
-        if not node:
-            self.clear()
-            return
-        node=torch.tensor(node, dtype=dtype)
-        self.clear()
-        self.node=node
-        self.element=element
-    
-    @classmethod
-    def from_curve(cls, curve):
+    def initialize(self, curve):
         #curve may be
         # a single curve: a 2D numpy/torch array or a list of points
-        # a list of curves = 3D array
+        # a list of curves: each is a 2D numpy/torch array or a list of points
+        # a 3D numpy/torch array: a list of curves of the same length
+        #a point in a list of points may be a 1D numpy/torch array
+        if not (torch.is_tensor(curve) or isinstance(curve, (np.ndarray, list, tuple))):
+            raise ValueError('unsupported type of curve: '+str(type(curve)))
         if len(curve) == 0:
-            return cls()
+            self.clear()
+            return
         if torch.is_tensor(curve) or isinstance(curve, np.ndarray):
             if len(curve.shape) == 2:
                 curve_list=[curve]
             elif len(curve.shape) == 3:
                 curve_list=curve
             else:
-                raise ValueError
-        elif isinstance(curve, list) or isinstance(curve, tuple):
+                raise ValueError('a curve array must be 2D or 3D, but its shape is '+str(tuple(curve.shape)))
+        else:
             try:
-                temp=float(curve[0][0])
+                first=curve[0][0]
+                temp=float(first.detach() if torch.is_tensor(first) else first)
                 curve_list=[curve]
-            except:            
-                curve_list=curve            
+            except Exception:
+                curve_list=curve
+        node=[]
+        element=[]
+        device=None #the first device that is not the cpu: a curve stays on its device and keeps its gradient
+        idx_start=0
+        for k in range(0, len(curve_list)):
+            curve_k=curve_list[k]
+            if torch.is_tensor(curve_k):
+                pass
+            elif isinstance(curve_k, np.ndarray):
+                curve_k=torch.tensor(curve_k, dtype=torch.float64 if curve_k.dtype == np.float64 else torch.float32)
+            elif isinstance(curve_k, list) or isinstance(curve_k, tuple):
+                #a point may be a 1D numpy/torch array
+                point_list=[point.tolist() if isinstance(point, np.ndarray) else point for point in curve_k]
+                tensor_list=[point for point in point_list if torch.is_tensor(point)]
+                if len(tensor_list) > 0:
+                    curve_k=torch.stack([torch.as_tensor(point, dtype=torch.float64, device=tensor_list[0].device) for point in point_list])
+                else:
+                    curve_k=torch.tensor(point_list, dtype=torch.float64)
+            else:
+                raise ValueError('unsupported type of curve in a list: '+str(type(curve_k)))
+            if len(curve_k) > 0:
+                if len(curve_k.shape) != 2:
+                    raise ValueError('a curve must be made of points, but node has shape '+str(tuple(curve_k.shape)))
+                if len(node) > 0 and curve_k.shape[1] != node[0].shape[1]:
+                    raise ValueError('all curves must have the same number of coordinates')
+                if device is None and curve_k.device.type != 'cpu':
+                    device=curve_k.device
+                node.append(curve_k)
+                idx_list=np.arange(idx_start, idx_start+len(curve_k)).tolist()
+                idx_start=idx_start+len(curve_k)
+                for n in range(1, len(idx_list)):
+                    element.append([idx_list[n-1], idx_list[n]]) #each element is VTK_LINE
+        if not node:
+            self.clear()
+            return
+        #cat takes the widest dtype of the curves, so that no curve is rounded
+        #and it makes a copy, so this mesh does not share memory with curve
+        node=torch.cat([curve_k.to(device=device) for curve_k in node], dim=0)
+        self.clear()
+        self.node=node
+        self.element=element
+    
+    @classmethod
+    def from_curve(cls, curve):
+        #curve may be a single curve or a list of curves, see initialize
         poly_line_mesh = cls()
-        poly_line_mesh.initialize(curve_list)
+        poly_line_mesh.initialize(curve)
         return poly_line_mesh
        
     def build_edge(self):
@@ -121,7 +133,7 @@ class PolylineMesh(Mesh):
     def find_boundary_edge(self):
         if self.edge is None:
             self.build_edge()
-        boundary_node=self.find_boundary_node()
+        boundary_node=set(self.find_boundary_node())
         boundary_edge=[]
         for k in range(0, len(self.edge)):
             idx0=int(self.edge[k,0])
@@ -134,11 +146,12 @@ class PolylineMesh(Mesh):
         if self.edge is None:
             self.build_edge()
         boundary_node=self.find_boundary_node()
+        boundary_node_set=set(boundary_node)
         boundary_edge=[]
         for k in range(0, len(self.edge)):
             idx0=int(self.edge[k,0])
             idx1=int(self.edge[k,1])
-            if (idx0 in boundary_node) or (idx1 in boundary_node):
+            if (idx0 in boundary_node_set) or (idx1 in boundary_node_set):
                 boundary_edge.append(k)
         return boundary_node, boundary_edge
 

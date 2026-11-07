@@ -11,15 +11,12 @@ class TriangleMesh(PolygonMesh):
     def __init__(self, node=None, element=None):
         super().__init__(node=node, element=element)
         self.mesh_type='polygon_tri3'
-        if (node is not None) and (element is not None):
-            if not self.is_tri():
-                raise ValueError('not a triangle mesh')
 
     def clear(self):
         super().clear()
 
-    def clear_geometry_derived_data(self):
-        super().clear_geometry_derived_data()
+    def clear_geometry_derived_data(self, clear_adjacency_data=True):
+        super().clear_geometry_derived_data(clear_adjacency_data)
         self.node_normal=None
         self.element_area=None
         self.element_normal=None
@@ -30,7 +27,7 @@ class TriangleMesh(PolygonMesh):
         self.node_normal=TriangleMesh.cal_node_normal(self.node, self.element, angle_weighted, self.element_normal, eps=eps)
         error=torch.isnan(self.node_normal).sum()
         if error > 0:
-            print("error: nan in normal_quad @ TriangleMesh:update_node_normal")
+            print("error: nan in node_normal @ TriangleMesh:update_node_normal")
 
     @staticmethod
     def cal_node_normal(node, element, angle_weighted=True, element_normal=None, eps=None):
@@ -45,14 +42,13 @@ class TriangleMesh(PolygonMesh):
         #-----------------------------------
         M=element.shape[0]
         e_normal=element_normal.reshape(M, 1, 3)
-        e_normal=e_normal.expand(M, 3, 3)
-        e_normal=e_normal.reshape(M*3, 3)
+        e_normal=e_normal.expand(M, 3, 3)        
         N=node.shape[0]
         if angle_weighted == True:
-            e_angle=TriangleMesh.cal_element_corner_angle(node, element, eps=eps)#e_angle: (M,3)
-            weight=e_angle/e_angle.sum(dim=1, keepdim=True)
-            e_normal=e_normal*weight.reshape(M*3,1)
-        node_normal = torch_scatter.scatter(e_normal, element.reshape(-1), dim=0, dim_size=N, reduce="sum")        
+            e_angle=TriangleMesh.cal_element_corner_angle(node, element, eps=eps)#e_angle: (M,3)            
+            e_normal=e_normal*e_angle.reshape(M,3,1)
+        #to e_normal.device: torch_scatter needs src and index on the same device
+        node_normal = torch_scatter.scatter(e_normal.reshape(-1,3), element.reshape(-1).to(e_normal.device), dim=0, dim_size=N, reduce="sum")        
         normal_norm=norm(node_normal, ord=2, dim=-1, keepdim=True)
         node_normal=node_normal/normal_norm.clamp_min(eps)
         node_normal=node_normal.contiguous()
@@ -60,12 +56,21 @@ class TriangleMesh(PolygonMesh):
 
     def update_element_area_and_normal(self, eps=None):
          self.element_area, self.element_normal=TriangleMesh.cal_element_area_and_normal(self.node, self.element, eps=eps)
+        
+    def update_element_normal(self, eps=None):
+         __, self.element_normal=TriangleMesh.cal_element_area_and_normal(self.node, self.element, eps=eps)
 
     def update_element_corner_angle(self, eps=None):
         self.element_corner_angle = TriangleMesh.cal_element_corner_angle(self.node, self.element, eps=eps)
 
     @staticmethod
     def cal_element_area_and_normal(node, element, eps=None):
+        """Return element_area (M,1) and element_normal (M,3).
+
+        The normal will not work for very small triangles. If the cross product of two edges is shorter than eps,
+        which with the default eps=1e-12 is a right triangle of side 1e-6 or less, the normal is shorter than 1:
+        its length is 0.01 at side 1e-7. Pass a smaller eps for such triangles.
+        """
         if eps is None:
             if node.dtype in (torch.float32, torch.float64):
                 eps=1e-12
@@ -104,21 +109,40 @@ class TriangleMesh(PolygonMesh):
         angle=torch.cat([angle0.reshape(-1,1), angle1.reshape(-1,1), angle2.reshape(-1,1)], dim=1)
         return angle
 
-    def sample_point(self, n_point):
-        return TriangleMesh.uniformly_sample_point(self.node, self.element, n_point)
+    def sample_point(self, n_point, at_least_one_point_on_one_element=False):
+        return TriangleMesh.uniformly_sample_point(self.node, self.element, n_point, at_least_one_point_on_one_element)
 
     @staticmethod
-    def uniformly_sample_point(node, element, n_point):
-        area, normal=TriangleMesh.cal_element_area_and_normal(node, element)
-        prob = area / area.sum()
-        if n_point > len(element):
-            sample = torch.multinomial(prob.reshape(-1), n_point-len(element), replacement=True)
-            #print("sample_points", area.shape, prob.shape, sample.shape)
-            element = torch.cat([element, element[sample]], dim=0)
-        else:
-            sample = torch.multinomial(prob.reshape(-1), n_point, replacement=True)
-            #print("sample_points", area.shape, prob.shape, sample.shape)
-            element = element[sample]
+    def uniformly_sample_point(node, element, n_point, at_least_one_point_on_one_element=False):
+        #at_least_one_point_on_one_element=False: each point picks its element by area,
+        #  so the points are uniform on the surface, and a small element may get no point
+        #at_least_one_point_on_one_element=True: each element gets one point, and the other
+        #  n_point-len(element) points pick their elements by area, so an element gets
+        #  1+(n_point-len(element))*prob points on average, and small elements get more
+        #  than their share of the area. n_point must be >= len(element)
+        M=len(element)
+        n_pick=n_point
+        if at_least_one_point_on_one_element:
+            if n_point < M:
+                raise ValueError('n_point must be >= the number of elements if at_least_one_point_on_one_element is True')
+            n_pick=n_point-M
+        sample=torch.empty(0, dtype=torch.int64, device=element.device)
+        if n_pick > 0:
+            #float64: so that the area of a tiny triangle in a float32 mesh does not become 0
+            x=node.detach().to(torch.float64)
+            x0=x[element[:,0]]
+            area=norm(torch.cross(x[element[:,1]]-x0, x[element[:,2]]-x0, dim=1), ord=2, dim=1)
+            #this is faster than torch.multinomial
+            cdf=torch.cumsum(area, dim=0)
+            if M == 0 or not (0 < cdf[-1] < float('inf')):
+                raise ValueError('cannot sample points on a mesh without a valid area')
+            r=torch.rand(n_pick, dtype=torch.float64, device=node.device)*cdf[-1]
+            #right=True: an element with zero area is not picked
+            #to element.device: a CPU element can't be indexed by a CUDA sample
+            sample=torch.searchsorted(cdf, r, right=True).clamp_max(M-1).to(element.device)
+        if at_least_one_point_on_one_element:
+            sample=torch.cat([torch.arange(M, device=element.device), sample], dim=0)
+        element=element[sample]
         a = torch.rand(2, n_point, 1, dtype=node.dtype, device=node.device)
         x0=node[element[:,0]]
         x1=node[element[:,1]]
@@ -129,8 +153,9 @@ class TriangleMesh(PolygonMesh):
         x=(1-u)*x0+u*(1-v)*x1+u*v*x2
         return x
 
-    def subdivid_to_tri_1to4(self):
+    def subdivide_to_tri_1to4(self):
         #return a new mesh
+        element=self.make_element_tensor().tolist()
         #add a node in the middle of each edge
         if self.edge is None:
             self.build_edge()
@@ -139,7 +164,6 @@ class TriangleMesh(PolygonMesh):
         nodeA=(x_j+x_i)/2
         #create new mesh
         node_new=torch.cat([self.node, nodeA], dim=0)        
-        element=self.element.tolist()
         element_new=[]
         for m in range(0, len(element)):
             #-----------
@@ -162,13 +186,14 @@ class TriangleMesh(PolygonMesh):
         mesh_new=TriangleMesh(node_new, element_new)
         return mesh_new
     
-    def subdivid_to_tri_1to3(self, mode=None):
+    def subdivide_to_tri_1to3(self, mode=None):
         #return a new mesh
         #add a node in the middle of each face        
-        nodeA=self.node[self.element].mean(dim=1)
+        element=self.make_element_tensor()
+        nodeA=self.node[element].mean(dim=1)
         #create new mesh
         node_new=torch.cat([self.node, nodeA], dim=0)        
-        element=self.element.tolist()
+        element=element.tolist()
         element_new=[]
         for m in range(0, len(element)):
             #-----------
@@ -188,16 +213,17 @@ class TriangleMesh(PolygonMesh):
         mesh_new=TriangleMesh(node_new, element_new)
         return mesh_new    
 
-    def subdivid_to_tri(self, mode):
+    def subdivide_to_tri(self, mode):
         if mode == "1to4":
-            return self.subdivid_to_tri_1to4()
+            return self.subdivide_to_tri_1to4()
         elif mode == "1to3":
-            return self.subdivid_to_tri_1to3()
+            return self.subdivide_to_tri_1to3()
         else:
             raise ValueError('unsupported mode: '+str(mode))
         
     def subdivide_to_quad(self):
         #return a new mesh
+        element=self.make_element_tensor()
         #add a node in the middle of each edge
         if self.edge is None:
             self.build_edge()
@@ -205,10 +231,10 @@ class TriangleMesh(PolygonMesh):
         x_i=self.node[self.edge[:,1]]
         nodeA=(x_j+x_i)/2
         #add a node in the middle of each element
-        nodeB=self.node[self.element].mean(dim=1)
+        nodeB=self.node[element].mean(dim=1)
         #create new mesh
         node_new=torch.cat([self.node, nodeA, nodeB], dim=0)
-        element=self.element.tolist()
+        element=element.tolist()
         element_new=[]
         for m in range(0, len(element)):
             #-----------

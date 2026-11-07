@@ -17,7 +17,7 @@ def _clear_geometry_cache(mesh):
         mesh.classify_element()
 
 
-def ReordeNodeInElement(mesh, ref_element_id, verbose=False):
+def ReorderNodeInElement(mesh, ref_element_id, verbose=False):
     #Orient the connected component consistently with the reference element.
     if not isinstance(mesh, PolygonMesh):
         raise NotImplementedError

@@ -5,7 +5,7 @@ PyTorch and compiled extension builds.
 
 ## Required dependencies
 
-The package requires NumPy, PyTorch, and `torch-scatter`.
+The package requires NumPy, SciPy, PyTorch, and `torch-scatter`.
 
 1. Install the PyTorch build for your Python version and CPU/CUDA environment
    using the [official PyTorch instructions](https://pytorch.org/get-started/locally/).
@@ -26,7 +26,6 @@ The import name is `torch_fea_mesh`; the distribution name is `torch-fea-mesh`.
 | Extra | Purpose | Installation |
 | --- | --- | --- |
 | `vtk` | VTK I/O, VTK-based processing, and isotropic remeshing | `python -m pip install '.[vtk]'` |
-| `remeshing` | Template barycentric remeshing with SciPy | `python -m pip install '.[remeshing]'` |
 | `chamfer` | Chamfer distance with PyTorch Geometric and its KNN backend | `python -m pip install '.[chamfer]'` |
 | `dev` | pytest, build tools, and distribution checks | `python -m pip install -e '.[dev]'` |
 

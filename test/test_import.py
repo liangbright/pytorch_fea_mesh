@@ -1,6 +1,7 @@
 import importlib.util
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -43,6 +44,14 @@ assert mesh.element.shape == (1, 4)
 assert 'vtk' not in sys.modules
 assert 'torch_geometric' not in sys.modules
 ''')
+
+
+def test_scipy_is_a_required_dependency():
+    tomllib = pytest.importorskip('tomllib')
+    project = tomllib.loads((Path(__file__).parents[1] / 'pyproject.toml').read_text())['project']
+    names = [re.match(r'[A-Za-z0-9_.-]+', requirement).group() for requirement in project['dependencies']]
+    assert 'scipy' in names
+    assert 'remeshing' not in project['optional-dependencies']
 
 
 @pytest.mark.parametrize('reverse', [False, True])

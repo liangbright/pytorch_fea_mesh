@@ -3,7 +3,7 @@ import torch
 
 from torch_fea_mesh.generation.mesh_example import (
     create_quad_grid_mesh, create_hex_grid_mesh, create_quad_cylinder_mesh,
-    create_quad_mesh_rectangle_in_rectangle, create_quad_mesh_rectangle_in_cirlce,
+    create_quad_mesh_rectangle_in_rectangle, create_quad_mesh_rectangle_in_circle,
     create_quad_tri_mesh_circle_in_circle,
 )
 
@@ -30,7 +30,7 @@ def test_cylinder_geometry_and_end_set():
     assert torch.all(mesh.node[mesh.node_set['boundary_upper'],2] == 4)
 
 
-@pytest.mark.parametrize("builder", [create_quad_mesh_rectangle_in_rectangle, create_quad_mesh_rectangle_in_cirlce])
+@pytest.mark.parametrize("builder", [create_quad_mesh_rectangle_in_rectangle, create_quad_mesh_rectangle_in_circle])
 @pytest.mark.parametrize("seal_hole", [False, True])
 def test_rectangle_based_generator(builder, seal_hole):
     mesh = builder(n_ring=3, Nx=3, Ny=3, seal_hole=seal_hole)

@@ -7,7 +7,7 @@ Created on Fri Nov  3 00:12:58 2023
 import torch
 import torch_scatter
 import numpy as np
-from ..mesh.mesh import Mesh
+from ..mesh.mesh import Mesh, find_vtk_cell_by_element_type, get_dimension_of_mesh_type
 from copy import deepcopy
 from ..utility.geometry_utility import cal_angle_between_3d_vector, ComputeAngleBetweenTwoVectorIn3D
 #%%
@@ -50,8 +50,8 @@ def segment_mesh_to_connected_region(mesh, adj):
 #%%
 SegmentMeshToConnectedRegion=segment_mesh_to_connected_region
 #%%
-def simple_smoother(field, adj_link, lamda, mask, inplace):
-    #field.shape (N, ?)
+def convert_smoother_mask(mask, field):
+    #return 1, or a tensor of shape (N,1) with the dtype and device of field
     if mask is None:
         mask=1    
     elif isinstance(mask, list):
@@ -68,6 +68,13 @@ def simple_smoother(field, adj_link, lamda, mask, inplace):
             raise ValueError            
     else:
         raise ValueError('python-object type of mask is not supported')
+    return mask
+#%%
+def simple_smoother(field, adj_link, lamda, mask, inplace):
+    #field.shape (N, ?)
+    mask=convert_smoother_mask(mask, field)
+    #the mesh builds its links on the CPU, and scatter needs them on the device of field
+    adj_link=adj_link.to(field.device)
     #---------
     x_j=field[adj_link[:,0]]
     x_i=field[adj_link[:,1]]
@@ -91,9 +98,10 @@ def simple_smoother_for_mesh(mesh, lamda, mask, n_iter):
     #---------
     if mesh.node_to_node_adj_link is None:
         mesh.build_node_to_node_adj_link()
-    adj_link=mesh.node_to_node_adj_link
+    adj_link=mesh.node_to_node_adj_link.to(mesh.node.device)
     for n in range(0, n_iter):
         SimpleSmoother(mesh.node, adj_link, lamda, mask, inplace=True)
+    mesh.clear_geometry_derived_data(clear_adjacency_data=False)
 #%%
 SimpleSmootherForMesh=simple_smoother_for_mesh        
 #%%
@@ -200,16 +208,68 @@ def trace_polyline(mesh, start_node_idx, next_node_idx, end_node_idx=None, angle
 #%%
 TracePolyline=trace_polyline
 #%%
+def merge_element_type(meshA, meshB):
+    #element_type of a merged mesh: meshA's elements, then meshB's.
+    #None if a save can take every cell type from the node count, as a reader does.
+    if (meshA.element_type is None and meshB.element_type is None and type(meshA) is type(meshB)
+        and meshA.mesh_type == meshB.mesh_type):
+        return None
+    label_list=[]
+    needed=False
+    for mesh in (meshA, meshB):
+        if mesh.element_type is not None:
+            label_list.extend(np.asarray(mesh.element_type).tolist())
+            needed=True
+            continue
+        #a mesh_type with one shape names it: polyhedron_hex8 gives HEX8, and polygon_quad4_tri3 gives nothing
+        name=mesh.mesh_type.split('_')
+        label=name[1].upper() if len(name) == 2 else None
+        if label is not None and find_vtk_cell_by_element_type(label) is None:
+            label=None
+        if label not in (None, 'TRI3', 'QUAD4', 'TET4', 'LINE2'):
+            needed=True
+        label_list.extend([label]*len(mesh.element))
+    return np.array(label_list, dtype=object) if needed else None
+#%%
+def make_merged_mesh(meshA, meshB, node, element):
+    #the result has the closest class that both meshes belong to: two TriangleMesh give a TriangleMesh,
+    #a TriangleMesh and a QuadMesh give a PolygonMesh, and a HexahedronMesh and a TetrahedronMesh give a PolyhedronMesh
+    #a polygon mesh never mixes linear and quadratic elements, so check_element_type raises on a Tri6Mesh with a TriangleMesh
+    mesh_class=None
+    for class_k in type(meshA).__mro__:
+        if class_k is not Mesh and issubclass(class_k, Mesh) and isinstance(meshB, class_k):
+            mesh_class=class_k
+            break
+    element_type=merge_element_type(meshA, meshB)
+    if mesh_class is None:
+        mesh_type=meshA.mesh_type if meshA.mesh_type == meshB.mesh_type else meshA.mesh_type.split('_')[0]
+        output=Mesh(node, element, element_type, mesh_type)
+    else:
+        output=mesh_class(node, element)
+        #mesh_class sets its own mesh_type, which can say less: load_from_torch can give a plain mesh polygon_tri6
+        if meshA.mesh_type == meshB.mesh_type:
+            output.mesh_type=meshA.mesh_type
+        output.check_element_type(element_type)
+        output.element_type=element_type
+    if torch.is_tensor(output.element):
+        output.element=output.element.to(node.device)
+    return output
+#%%
 def merge_mesh(meshA, node_idx_listA, meshB, node_idx_listB, distance_threshold):
     #Merge: meshA <= meshB
     #The shared points are in node_idx_listA of meshA and node_idx_listB of meshB
     #if both node_idx_listA and node_idx_listB are None, simply do meshA + meshB - no point merging    
     #if the distance between two nodes is <= distance_threshold, then merge the two nodes
-    if (not isinstance(meshA, Mesh)) or (not isinstance(meshA, Mesh)):
+    #node_data, element_data, node_set and element_set are not carried over
+    #the output is on the device of meshA.node, and meshB can be on another device
+    if (not isinstance(meshA, Mesh)) or (not isinstance(meshB, Mesh)):
         #raise NotImplementedError
         print("warning: input may not be Mesh @ MergeMesh")
     if meshA.node.shape[0] == 0 or meshB.node.shape[0] == 0:
         raise ValueError("meshA or meshB is empty")
+    if get_dimension_of_mesh_type(meshA.mesh_type) != get_dimension_of_mesh_type(meshB.mesh_type):
+        raise ValueError('a mesh never mixes dimensions: '+meshA.mesh_type+' and '+meshB.mesh_type)
+    nodeB=meshB.node.to(meshA.node.device)
     #---------------------------------------------------
     if (node_idx_listA is None) or (node_idx_listB is None):
         elementA=meshA.make_element_copy('list')
@@ -221,18 +281,17 @@ def merge_mesh(meshA, node_idx_listA, meshB, node_idx_listB, distance_threshold)
             for m in range(0, len(elementB)):
                 for n in range(0, len(elementB[m])):
                     elementB[m][n]=elementB[m][n]+len(meshA.node)
-        nodeAB=meshA.node.tolist() + meshB.node.tolist()
+        nodeAB=torch.cat([meshA.node, nodeB], dim=0)
         elementAB=elementA + elementB
-        meshAB=Mesh(nodeAB, elementAB, meshA.element_type, meshA.mesh_type)
-        return meshAB
+        return make_merged_mesh(meshA, meshB, nodeAB, elementAB)
     #---------------------------------------------------
-    node_idx_map_B_to_Out=-1*np.ones(meshB.node.shape[0])
+    node_idx_map_B_to_Out=-1*np.ones(meshB.node.shape[0], dtype=np.int64)
 
     A = meshA.node[node_idx_listA]
     if len(A) > 0 and len(node_idx_listB) > 0:
         counterA = np.zeros(len(A))
         for n in range(0, len(node_idx_listB)):
-            node_n=meshB.node[node_idx_listB[n]].view(1,-1)
+            node_n=nodeB[node_idx_listB[n]].view(1,-1)
             dist=((A-node_n)**2).sum(dim=1).sqrt()
             idx=dist.argmin()
             if dist[idx] <= distance_threshold:
@@ -249,38 +308,43 @@ def merge_mesh(meshA, node_idx_listA, meshB, node_idx_listB, distance_threshold)
             node_idx_map_B_to_Out[n]=node_idx
             node_idx_listB_keep.append(n)
 
-    nodeAB=torch.cat([meshA.node, meshB.node[node_idx_listB_keep]], dim=0)
+    nodeAB=torch.cat([meshA.node, nodeB[node_idx_listB_keep]], dim=0)
     elementAB=meshA.make_element_copy('list') + meshB.make_element_copy('list')
     for m in range(len(meshA.element), len(elementAB)):
         elm=elementAB[m]
         for k in range(0, len(elm)):
-            elm[k]=node_idx_map_B_to_Out[elm[k]]
+            elm[k]=int(node_idx_map_B_to_Out[elm[k]])
 
-    meshAB=Mesh(nodeAB, elementAB, meshA.element_type, meshA.mesh_type)
-    return meshAB
+    return make_merged_mesh(meshA, meshB, nodeAB, elementAB)
 #%%
 MergeMesh=merge_mesh
 #%%
 def remove_unused_node(mesh, return_node_idx_list=False, clear_adj_info=True):
     #if a node does not belong to an element, then it is unused
-    #this function may change the node order in mesh.node
-    element=mesh.make_element_copy("list")
-    map=-torch.ones(mesh.node.shape[0], dtype=torch.int64)
-    node_idx=-1
-    for m in range(0, len(element)):
-        elm=element[m]
-        for n in range(0, len(elm)):
-            idx=elm[n]
-            if idx < 0:
-                raise ValueError("idx < 0, the output may be wrong")
-            if map[idx] < 0:
-                node_idx+=1
-                elm[n]=node_idx#new idx
-                map[idx]=node_idx
-            else:
-                elm[n]=map[idx]
-    node_idx_list=torch.where(map>=0)[0]
-    node_idx_list=node_idx_list[torch.argsort(map[node_idx_list])]
+    #this function may change the node order in mesh.node: new indexes follow the first use in mesh.element
+    #clear_adj_info has no effect, and stays so that old calls still work: the adjacency tables
+    #hold node indexes, which change even when no node is unused, so they are always cleared
+    if torch.is_tensor(mesh.element):
+        element=None
+        flat=mesh.element.detach().cpu().numpy().reshape(-1)
+    else:
+        element=mesh.make_element_copy("list")
+        flat=np.array([idx for elm in element for idx in elm], dtype=np.int64)
+    if (flat < 0).any():
+        raise ValueError("idx < 0, the output may be wrong")
+    used, first_use=np.unique(flat, return_index=True)
+    node_idx_list=used[np.argsort(first_use)].astype(np.int64)
+    map=np.full(mesh.node.shape[0], -1, dtype=np.int64)
+    map[node_idx_list]=np.arange(len(node_idx_list))
+    flat=map[flat]
+    if element is None:
+        element=torch.as_tensor(flat, dtype=mesh.element.dtype, device=mesh.element.device).reshape(mesh.element.shape)
+    else:
+        idx=0
+        for elm in element:
+            elm[:]=flat[idx:(idx+len(elm))].tolist()
+            idx=idx+len(elm)
+    node_idx_list=torch.from_numpy(node_idx_list)
     #Remap metadata before changing the geometry, preserving field containers.
     kept=node_idx_list.tolist()
     old_to_new=map.tolist()
@@ -314,9 +378,6 @@ def remove_unused_node(mesh, return_node_idx_list=False, clear_adj_info=True):
     node_names={name:remap_index(idx) for name, idx in mesh.mapping_from_node_name_to_index.items()}
     node_names={name:idx for name, idx in node_names.items() if idx >= 0}
     node=mesh.node[node_idx_list.to(mesh.node.device)]
-    if torch.is_tensor(mesh.element):
-        element=torch.tensor(element, dtype=mesh.element.dtype,
-                             device=mesh.element.device).reshape(mesh.element.shape)
     name=mesh.name
     element_type=mesh.element_type
     element_data=mesh.element_data
@@ -331,8 +392,6 @@ def remove_unused_node(mesh, return_node_idx_list=False, clear_adj_info=True):
     mesh.node_data=node_data
     mesh.node_set=node_set
     mesh.mapping_from_node_name_to_index=node_names
-    if clear_adj_info == True:
-        mesh.clear_adj_info()
     if return_node_idx_list == True:
         return node_idx_list
 #%%
@@ -340,26 +399,26 @@ RemoveUnusedNode=remove_unused_node
 #%%
 def find_nearest_node(mesh, point, distance_threshold=np.inf):
     #point (K, 3) or (3,)
+    #return one result per point: a node index, or None if no node is within distance_threshold
     if not isinstance(point, (torch.Tensor, np.ndarray)):
         raise ValueError("unsupported type "+str(type(point)))
     if isinstance(point, np.ndarray):
         point=torch.tensor(point, dtype=mesh.node.dtype)    
+    point=point.to(mesh.node.device)
     flag=(len(point.shape) == 1)
     point=point.view(-1,3)
     node_idx_list=[]
     for n in range(0, len(point)):
         p=point[n].view(1,-1)
         d=((mesh.node-p)**2).sum(dim=-1)
-        idx=d.argmin()
-        if float(d[idx]) <= distance_threshold**2:
-            node_idx_list.append(int(idx))    
+        if len(d) > 0 and float(d.min()) <= distance_threshold**2:
+            node_idx_list.append(int(d.argmin()))
+        else:
+            node_idx_list.append(None)
     if flag == False:
         return node_idx_list
     else:
-        if len(node_idx_list) > 0:
-            return node_idx_list[0]
-        else:
-            return None
+        return node_idx_list[0]
 #%%
 FindNearestNode=find_nearest_node
 #%%

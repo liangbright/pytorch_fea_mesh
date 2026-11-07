@@ -26,8 +26,8 @@ class Tri6Mesh(PolygonMesh):
     def clear(self):
         super().clear()
 
-    def clear_geometry_derived_data(self):
-        super().clear_geometry_derived_data()
+    def clear_geometry_derived_data(self, clear_adjacency_data=True):
+        super().clear_geometry_derived_data(clear_adjacency_data)
         self.node_normal=None
         self.element_area=None
         self.element_normal=None
@@ -74,8 +74,9 @@ class Tri6Mesh(PolygonMesh):
             return mesh_new, node_idx_list
         
     def subdivide_to_tri3(self, clone_node=True):        
+        element=self.make_element_tensor().tolist()
         element_out=[]
-        for m in range(0, self.element.shape[0]):
+        for m in range(0, len(element)):
             #-----------
             #     x2
             #    /  \
@@ -83,14 +84,14 @@ class Tri6Mesh(PolygonMesh):
             #  /      \
             # x0--x3--x1
             #-----------
-            id0, id1, id2, id3, id4, id5 = self.element[m].tolist()
+            id0, id1, id2, id3, id4, id5 = element[m]
             element_out.append([id0, id3, id5])
             element_out.append([id3, id4, id5])
             element_out.append([id1, id4, id3])
             element_out.append([id2, id5, id4])
-            node_out=self.node
-            if clone_node==True:
-                node_out=node_out.clone()
+        node_out=self.node
+        if clone_node==True:
+            node_out=node_out.clone()
         mesh_new=TriangleMesh(node_out, element_out)
         return mesh_new
         
@@ -120,7 +121,7 @@ class Tri6Mesh(PolygonMesh):
         self.node_normal=Tri6Mesh.cal_node_normal(self.node, self.element, angle_weighted, self.element_normal, eps=eps)
         error=torch.isnan(self.node_normal).sum()
         if error > 0:
-            print("error: nan in normal_quad @ Tri6Mesh:update_node_normal")
+            print("error: nan in node_normal @ Tri6Mesh:update_node_normal")
 
     @staticmethod
     def cal_node_normal(node, element, angle_weighted=True, element_normal=None, eps=None):
@@ -141,7 +142,8 @@ class Tri6Mesh(PolygonMesh):
             e_angle=Tri6Mesh.cal_element_corner_angle(node, element, eps=eps)#e_angle: (M,6)
             weight=e_angle/e_angle.sum(dim=1, keepdim=True)
             e_normal=e_normal*weight.reshape(M*6,1)
-        node_normal = torch_scatter.scatter(e_normal, element.reshape(-1), dim=0, dim_size=N, reduce="sum")        
+        #to e_normal.device: torch_scatter needs src and index on the same device
+        node_normal = torch_scatter.scatter(e_normal, element.reshape(-1).to(e_normal.device), dim=0, dim_size=N, reduce="sum")        
         normal_norm=norm(node_normal, ord=2, dim=-1, keepdim=True)
         node_normal=node_normal/normal_norm.clamp_min(eps)
         node_normal=node_normal.contiguous()
@@ -150,11 +152,20 @@ class Tri6Mesh(PolygonMesh):
     def update_element_area_and_normal(self, eps=None):
          self.element_area, self.element_normal=Tri6Mesh.cal_element_area_and_normal(self.node, self.element, eps=eps)
 
+    def update_element_normal(self, eps=None):
+         self.element_normal=Tri6Mesh.cal_element_normal(self.node, self.element, eps=eps)
+
     def update_element_corner_angle(self, eps=None):
         self.element_corner_angle = Tri6Mesh.cal_element_corner_angle(self.node, self.element, eps=eps)
 
     @staticmethod
     def cal_element_area_and_normal(node, element, eps=None):
+        """Return element_area (M,1) and element_normal (M,3).
+
+        The normal will not work for very small triangles, as in TriangleMesh.cal_element_area_and_normal.
+        Each of the 4 flat triangles counts here, so with the default eps=1e-12 this is a right triangle
+        element of side 2e-6 or less: the length of the normal is 0.25 at side 1e-6 and 0.0025 at side 1e-7.
+        """
         if eps is None:
             if node.dtype in (torch.float32, torch.float64):
                 eps=1e-12

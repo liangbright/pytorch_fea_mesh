@@ -10,10 +10,14 @@ class PolyhedronMesh(Mesh):
     def clear(self):
         super().clear()
 
-    def clear_geometry_derived_data(self):
-        super().clear_geometry_derived_data()
+    def clear_geometry_derived_data(self, clear_adjacency_data=True):
+        super().clear_geometry_derived_data(clear_adjacency_data)
 
     def build_face_to_element_adj_table(self):
+        #for now, only TetrahedronMesh, Tet10Mesh and HexahedronMesh have a face table
+        #so find_boundary_face and find_boundary_node are not supported for other meshes
+        if not hasattr(self, 'build_element_to_face_adj_table'):
+            raise NotImplementedError('find_boundary_face and find_boundary_node support only TetrahedronMesh, Tet10Mesh and HexahedronMesh, not '+type(self).__name__)
         if self.element_to_face_adj_table is None:
             self.build_element_to_face_adj_table()
         adj_table=[[] for _ in range(len(self.face))]
@@ -42,10 +46,12 @@ class PolyhedronMesh(Mesh):
         return node_idx_list
     
     def get_sub_mesh(self, element_idx_list, return_node_idx_list=False):
-        new_mesh, node_idx_list=super().get_sub_mesh(element_idx_list, return_node_idx_list=True)
-        new_mesh=PolyhedronMesh(new_mesh.node, new_mesh.element)
+        sub_mesh, node_idx_list=super().get_sub_mesh(element_idx_list, return_node_idx_list=True)
+        sub_mesh=PolyhedronMesh(sub_mesh.node, sub_mesh.element, sub_mesh.element_type)
+        #mesh_type can say more than polyhedron: load_from_torch can set polyhedron_hex8
+        sub_mesh.mesh_type=self.mesh_type
         if return_node_idx_list == False:
-            return new_mesh
+            return sub_mesh
         else:
-            return new_mesh, node_idx_list
+            return sub_mesh, node_idx_list
 #%%

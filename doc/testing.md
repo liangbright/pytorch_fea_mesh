@@ -2,7 +2,7 @@
 
 The test suite uses pytest to run numerical assertions, regression checks, and
 import checks. Install the package and development dependencies as described in
-[installation](installation.md). Core tests require NumPy, PyTorch, and
+[installation](installation.md). Core tests require NumPy, SciPy, PyTorch, and
 `torch-scatter`; optional VTK and Chamfer tests need their corresponding extras.
 
 ## Run all or selected tests

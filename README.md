@@ -22,7 +22,7 @@ build, then install the package from the project root:
 python -m pip install .
 ```
 
-`torch-scatter` is required. VTK-based features, including isotropic remeshing,
+SciPy and `torch-scatter` are required. VTK-based features, including isotropic remeshing,
 are available through the `vtk` extra:
 
 ```bash
@@ -63,8 +63,8 @@ remeshed = isotropic_triangle_surface_remesh(
 )
 ```
 
-Template barycentric remeshing is available with the `remeshing` extra. See
-`example/remesh_template_barycentric.py` for boundary and interior landmark examples.
+For template barycentric remeshing, see `example/remesh_template_barycentric.py`, with
+boundary and interior landmark examples.
 
 See the [API overview](doc/api.md), [remeshing guide](doc/remeshing.md), and
 [runnable examples](example/README.md).

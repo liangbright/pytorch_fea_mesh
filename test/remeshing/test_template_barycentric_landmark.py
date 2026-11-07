@@ -1,10 +1,6 @@
 """Public landmark correspondence tests, including shared boundary vertices."""
 from copy import deepcopy
 import unittest
-from importlib.util import find_spec
-
-if find_spec("scipy") is None:
-    raise unittest.SkipTest("Install torch-fea-mesh[remeshing] for SciPy")
 
 import numpy as np
 import torch
