@@ -1,6 +1,18 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 - 2026-11-07
+
+- Mesh containers for polygon, polyline, triangle, quad, mixed quad/triangle,
+  tetrahedral, and hexahedral geometry, including quadratic triangle and
+  tetrahedral elements.
+- Connectivity and geometry operations, smoothing, repair, surface extraction,
+  and isotropic triangle surface remeshing with feature protection.
+- Rotation, rigid, and similarity transforms, synthetic mesh generation, and
+  Chamfer distance utilities.
+- Torch serialization and INP/VTK I/O.
+- Automated tests, runnable examples, and installation and API documentation.
+
+### Changes since the first commit (2026-10-25)
 
 - `RotationTransform3D`, `RigidTransform3D`, `SimilarityTransform3D` and
   `RodrigueRotationTransform3D` take a new `dtype` input for their parameters. The default
@@ -224,15 +236,3 @@
 - SciPy 1.14 or newer is now a required dependency, so `pip install torch-fea-mesh` installs it, and the `remeshing`
   extra is removed. Template barycentric remeshing and `flag_use_coverage_then_tangential` no longer need an extra.
   An install that still asks for `[remeshing]` works, with a warning from pip that the extra doesn't exist.
-
-## 0.1.0
-
-- Mesh containers for polygon, polyline, triangle, quad, mixed quad/triangle,
-  tetrahedral, and hexahedral geometry, including quadratic triangle and
-  tetrahedral elements.
-- Connectivity and geometry operations, smoothing, repair, surface extraction,
-  and isotropic triangle surface remeshing with feature protection.
-- Rotation, rigid, and similarity transforms, synthetic mesh generation, and
-  Chamfer distance utilities.
-- Torch serialization and INP/VTK I/O.
-- Automated tests, runnable examples, and installation and API documentation.
