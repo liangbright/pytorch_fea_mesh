@@ -21,10 +21,10 @@ def run_python(code):
 
 
 def test_package_root_does_not_import_optional_module():
-    run_python('import sys, torch_fea_mesh; '
+    run_python('import sys, importlib.metadata, torch_fea_mesh; '
                'assert "vtk" not in sys.modules; '
                'assert "torch_geometric" not in sys.modules; '
-               'assert torch_fea_mesh.__version__ == "0.1.0"')
+               'assert torch_fea_mesh.__version__ == importlib.metadata.version("torch-fea-mesh")')
 
 
 def test_core_import_without_optional_dependency():
@@ -52,6 +52,16 @@ def test_scipy_is_a_required_dependency():
     names = [re.match(r'[A-Za-z0-9_.-]+', requirement).group() for requirement in project['dependencies']]
     assert 'scipy' in names
     assert 'remeshing' not in project['optional-dependencies']
+
+
+def test_version_has_one_source():
+    #the version is written only in torch_fea_mesh/__init__.py; pyproject.toml reads it from there
+    tomllib = pytest.importorskip('tomllib')
+    config = tomllib.loads((Path(__file__).parents[1] / 'pyproject.toml').read_text())
+    assert 'version' not in config['project']
+    assert 'version' in config['project']['dynamic']
+    assert config['tool']['setuptools']['dynamic']['version'] == {'attr': 'torch_fea_mesh.__version__'}
+    assert re.fullmatch(r'\d+\.\d+\.\d+', torch_fea_mesh.__version__)
 
 
 @pytest.mark.parametrize('reverse', [False, True])
