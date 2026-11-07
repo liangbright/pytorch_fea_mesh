@@ -88,8 +88,6 @@ def extract_surface_element(mesh):
     surface_element=mesh.face[face_idx_list].tolist()
     return surface_element
 #%%
-ExtractSurfaceElement=extract_surface_element
-#%%
 def extract_surface_mesh(mesh, return_node_idx_list=False):
     #if return_node_idx_list is True, also return node_idx_list:
     #surface_mesh.node[k] is mesh.node[node_idx_list[k]], which maps a load or a boundary condition to mesh
@@ -114,4 +112,3 @@ def extract_surface_mesh(mesh, return_node_idx_list=False):
         return surface_mesh, node_idx_list
     return surface_mesh
 #%%
-ExtractSurfaceMesh=extract_surface_mesh

@@ -9,7 +9,7 @@ import torch
 from torch.linalg import vector_norm as norm
 import numpy as np
 #%%
-def ComputeAngleBetweenTwoVectorIn3D_slow(VectorA, VectorB, eps=None):
+def cal_angle_between_3d_vector_slow(VectorA, VectorB, eps=None):
     #Unsigned angle in [0, pi]; eps clamps lengths, not the acos endpoints.
     #VectorA.shape (B,3)
     #VectorB.shape (B,3)
@@ -34,7 +34,7 @@ def ComputeAngleBetweenTwoVectorIn3D_slow(VectorA, VectorB, eps=None):
         L2Norm_A = np.sqrt(VectorA[:,0]*VectorA[:,0]+VectorA[:,1]*VectorA[:,1]+VectorA[:,2]*VectorA[:,2])
         L2Norm_B = np.sqrt(VectorB[:,0]*VectorB[:,0]+VectorB[:,1]*VectorB[:,1]+VectorB[:,2]*VectorB[:,2])
         if np.any(L2Norm_A <= eps) or np.any(L2Norm_B <= eps):
-            print("L2Norm <= eps, np.clip to eps @ ComputeAngleBetweenTwoVectorIn3D(...)")
+            print("L2Norm <= eps, np.clip to eps @ cal_angle_between_3d_vector_slow(...)")
         L2Norm_A=np.clip(L2Norm_A, min=eps)
         L2Norm_B=np.clip(L2Norm_B, min=eps)
         CosTheta = (VectorA[:,0]*VectorB[:,0]+VectorA[:,1]*VectorB[:,1]+VectorA[:,2]*VectorB[:,2])/(L2Norm_A*L2Norm_B);
@@ -44,7 +44,7 @@ def ComputeAngleBetweenTwoVectorIn3D_slow(VectorA, VectorB, eps=None):
         L2Norm_A = norm(VectorA, ord=2, dim=-1)
         L2Norm_B = norm(VectorB, ord=2, dim=-1)
         if torch.any(L2Norm_A <= eps) or torch.any(L2Norm_B <= eps):
-            print("L2Norm <= eps, torch.clamp to eps @ ComputeAngleBetweenTwoVectorIn3D(...)")
+            print("L2Norm <= eps, torch.clamp to eps @ cal_angle_between_3d_vector_slow(...)")
         L2Norm_A=L2Norm_A.clamp_min(eps)
         L2Norm_B=L2Norm_B.clamp_min(eps)
         CosTheta = (VectorA[:,0]*VectorB[:,0]+VectorA[:,1]*VectorB[:,1]+VectorA[:,2]*VectorB[:,2])/(L2Norm_A*L2Norm_B);              
@@ -117,4 +117,3 @@ def cal_angle_between_3d_vector(VectorA, VectorB, return_cos=False, eps=None):
     else:
         raise ValueError('invalid input')
 #%%
-ComputeAngleBetweenTwoVectorIn3D=cal_angle_between_3d_vector

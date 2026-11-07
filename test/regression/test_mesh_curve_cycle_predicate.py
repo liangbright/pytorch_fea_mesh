@@ -8,7 +8,7 @@ import unittest
 import numpy as np
 import torch
 
-from torch_fea_mesh.processing.mesh_processing import is_node_curve_closed, IsNodeCurveClosed
+from torch_fea_mesh.processing.mesh_processing import is_node_curve_closed
 from torch_fea_mesh.mesh.polyline_mesh import PolylineMesh
 from torch_fea_mesh.mesh.quad_mesh import QuadMesh
 from torch_fea_mesh.mesh.triangle_mesh import TriangleMesh
@@ -83,7 +83,7 @@ class CurveCyclePredicateTest(unittest.TestCase):
                 for values, expected in (([0,1,2], False), ([0,1,2,0], True)):
                     with self.subTest(dtype=dtype, container=make_input.__name__, values=values):
                         curve = make_input(values)
-                        self.assertIs(IsNodeCurveClosed(mesh, curve), expected)
+                        self.assertIs(is_node_curve_closed(mesh, curve), expected)
                         self.assertEqual([int(i) for i in curve], values)
             torch.testing.assert_close(mesh.node, nodes)
             torch.testing.assert_close(mesh.element, elements)

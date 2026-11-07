@@ -15,6 +15,27 @@
   `ReordeNodeInElement` is now `ReorderNodeInElement`; and the name
   `QuadMesh.upate_element_flatness` is gone, so use `update_element_flatness`. Calls that use
   an old name must change.
+- The CamelCase aliases of processing and geometry functions are removed, so only the
+  snake_case names remain. Calls that use an alias must change to the function it named. Most
+  of these are the same name in snake_case, for example `MergeMesh` is now `merge_mesh`. The
+  others are `PointToMeshDistance` (now `cal_point_to_mesh_distance`), `MeshToMeshDistance`
+  (`cal_mesh_to_mesh_distance`), `ComputeCurvature` (`cal_curvature`), `Subdivision`
+  (`subdivide`) and `ComputeAngleBetweenTwoVectorIn3D` (`cal_angle_between_3d_vector`), and
+  `ComputeAngleBetweenTwoVectorIn3D_slow` is renamed `cal_angle_between_3d_vector_slow`. The
+  removed names are: in `mesh_processing`, `FindConnectedRegion`,
+  `SegmentMeshToConnectedRegion`, `SimpleSmoother`, `SimpleSmootherForMesh`,
+  `IsEdgeCurveClosed`, `IsNodeCurveClosed`, `TracePolyline`, `MergeMesh`, `RemoveUnusedNode`,
+  `FindNearestNode` and `FindNeighborNode`, which `polygon_mesh_processing` also no longer
+  imports; in `polyhedron_mesh_processing`, `ExtractSurfaceElement` and `ExtractSurfaceMesh`;
+  in `polygon_mesh_processing`, `TraceMeshBoundaryCurve`, `FindMeshBoundaryCurve`,
+  `ExtractRegionEnclosedByCurve`, `SegmentMeshByCurve`, `MergeMeshOnBoundary`,
+  `SimpleSmootherForMeshNodeNormal`, `SimpleSmootherForMeshElementNormal`,
+  `SimpleSmootherForQuadMesh`, `CutMeshByCurve`, `ProjectPointToMesh`, `SmoothAndProject`,
+  `PointToMeshDistance`, `MeshToMeshDistance`, `ConvertPolygonMeshToTriangleMesh`,
+  `ClipMeshByPlane`, `ClipMeshByNodeAttribute`, `SliceMeshByPlane`, `ComputeCurvature`,
+  `FillHole`, `FindDijkstraGraphGeodesicPath` and `Subdivision`, and its import of
+  `ComputeAngleBetweenTwoVectorIn3D`; and in `geometry_utility`,
+  `ComputeAngleBetweenTwoVectorIn3D`.
 - Isotropic remesher: a float32 source no longer raises at the end of a finished run, and
   `failures` now matches the output. Each new position is rounded to float32 when it is proposed,
   so the checks see what is written. Float32 results can change; float64 results don't.

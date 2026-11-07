@@ -10,7 +10,7 @@ import unittest
 import numpy as np
 import torch
 
-from torch_fea_mesh.utility.geometry_utility import cal_angle_between_3d_vector, ComputeAngleBetweenTwoVectorIn3D
+from torch_fea_mesh.utility.geometry_utility import cal_angle_between_3d_vector
 
 
 def angle_value(parameters, scale_a, scale_b, return_cos):
@@ -82,13 +82,12 @@ class GeometryAngleGradientTest(unittest.TestCase):
                     self.assertTrue(torch.isfinite(a.grad).all())
                     self.assertTrue(torch.isfinite(b.grad).all())
 
-    def test_single_vector_empty_batch_and_legacy_alias(self):
-        self.assertIs(ComputeAngleBetweenTwoVectorIn3D,cal_angle_between_3d_vector)
+    def test_single_vector_and_empty_batch(self):
         for dtype in (torch.float32,torch.float64):
             for return_cos in (False,True):
                 a=torch.tensor([1.,0,0],dtype=dtype)
                 b=torch.tensor([0.,1,0],dtype=dtype)
-                result=ComputeAngleBetweenTwoVectorIn3D(a,b,return_cos)
+                result=cal_angle_between_3d_vector(a,b,return_cos)
                 self.assertEqual(result.shape,(1,))
                 expected=0. if return_cos else np.pi/2
                 torch.testing.assert_close(result,torch.tensor([expected],dtype=dtype))

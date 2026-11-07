@@ -12,8 +12,6 @@ from copy import deepcopy
 from .mesh_processing import convert_smoother_mask, remove_unused_node
 from .mesh_processing import simple_smoother, simple_smoother_for_mesh, trace_polyline, is_edge_curve_closed, is_node_curve_closed, merge_mesh, find_connected_region, find_nearest_node, segment_mesh_to_connected_region, find_neighbor_node
 from ..utility.geometry_utility import cal_angle_between_3d_vector
-from .mesh_processing import SimpleSmoother, SimpleSmootherForMesh, TracePolyline, IsEdgeCurveClosed, IsNodeCurveClosed, MergeMesh, FindConnectedRegion, FindNearestNode, SegmentMeshToConnectedRegion, FindNeighborNode
-from ..utility.geometry_utility import ComputeAngleBetweenTwoVectorIn3D
 try:
     import vtk
 except Exception as e:
@@ -111,10 +109,8 @@ def trace_mesh_boundary_curve(mesh, start_node_idx, next_node_idx=None, end_node
         if flag == False:
             break
     if (end_node_idx is not None) and (BoundaryCurve[-1] != end_node_idx):
-        print("warning: BoundaryCurve[-1] != end_node_idx @ TraceMeshBoundaryCurve")
+        print("warning: BoundaryCurve[-1] != end_node_idx @ trace_mesh_boundary_curve")
     return BoundaryCurve
-#%% old name
-TraceMeshBoundaryCurve=trace_mesh_boundary_curve
 #%%
 def find_mesh_boundary_curve(mesh, follow_element_orientation=False):
     if not isinstance(mesh, PolygonMesh):
@@ -124,12 +120,10 @@ def find_mesh_boundary_curve(mesh, follow_element_orientation=False):
     while True:
         if len(node_idx_list) == 0:
             break
-        BoundaryCurve=TraceMeshBoundaryCurve(mesh, node_idx_list[0], follow_element_orientation=follow_element_orientation)
+        BoundaryCurve=trace_mesh_boundary_curve(mesh, node_idx_list[0], follow_element_orientation=follow_element_orientation)
         BoundaryCurveList.append(BoundaryCurve)
         node_idx_list=list(set(node_idx_list)-set(BoundaryCurve))
     return BoundaryCurveList
-#%% old name
-FindMeshBoundaryCurve=find_mesh_boundary_curve
 #%%
 def extract_region_enclosed_by_curve(mesh, node_curve_list, inner_element_idx, max_n_element=float('inf')):
     #node_curve_list[k] is an ordered list/array of node indexes on mesh.
@@ -189,13 +183,11 @@ def extract_region_enclosed_by_curve(mesh, node_curve_list, inner_element_idx, m
         #if counter ==100:
         #    break
         if len(region_element_list) > max_n_element:
-            print('break: len(region_element_list) > max_n_elements @ExtractRegionEnclosedByCurve')
+            print('break: len(region_element_list) > max_n_elements @ extract_region_enclosed_by_curve')
             break
     #--------------
     # indexes of elements in the region
     return region_element_list  
-#%% old name
-ExtractRegionEnclosedByCurve=extract_region_enclosed_by_curve
 #%%
 def segment_mesh_by_curve(mesh, node_curve_list):
     if not isinstance(mesh, PolygonMesh):
@@ -205,12 +197,10 @@ def segment_mesh_by_curve(mesh, node_curve_list):
     while True:
         if len(element_list) == 0:
             break
-        region=ExtractRegionEnclosedByCurve(mesh, node_curve_list, element_list[0])
+        region=extract_region_enclosed_by_curve(mesh, node_curve_list, element_list[0])
         region_list.append(region)
         element_list=list(set(element_list)-set(region))
     return region_list
-#%% old name
-SegmentMeshByCurve=segment_mesh_by_curve
 #%%
 def merge_mesh_on_boundary(mesh_list, distance_threshold):
     merged_mesh=mesh_list[0]
@@ -222,8 +212,6 @@ def merge_mesh_on_boundary(mesh_list, distance_threshold):
                                mesh_n, mesh_n.find_boundary_node(),
                                distance_threshold)
     return merged_mesh
-#%% old name
-MergeMeshOnBoundary=merge_mesh_on_boundary
 #%%
 def simple_smoother_for_mesh_node_normal(mesh, lamda, mask, n_iter, update_node_normal=True, eps=None):
     if not isinstance(mesh, PolygonMesh):
@@ -250,8 +238,6 @@ def simple_smoother_for_mesh_node_normal(mesh, lamda, mask, n_iter, update_node_
         node_normal=node_normal/normal_norm
     node_normal=node_normal.contiguous()
     mesh.node_normal=node_normal
-#%% old name
-SimpleSmootherForMeshNodeNormal=simple_smoother_for_mesh_node_normal
 #%%
 def simple_smoother_for_mesh_element_normal(mesh, lamda, mask, n_iter, update_element_normal=True, eps=None):
     if not isinstance(mesh, PolygonMesh):
@@ -278,8 +264,6 @@ def simple_smoother_for_mesh_element_normal(mesh, lamda, mask, n_iter, update_el
         element_normal=element_normal/normal_norm
     element_normal=element_normal.contiguous()
     mesh.element_normal=element_normal
-#%% old name
-SimpleSmootherForMeshElementNormal=simple_smoother_for_mesh_element_normal
 #%%
 def simple_smoother_for_quad_mesh(mesh, lamda, mask, n_iter):
     if not isinstance(mesh, QuadMesh):
@@ -300,8 +284,6 @@ def simple_smoother_for_quad_mesh(mesh, lamda, mask, n_iter):
     for n in range(0, n_iter):
         simple_smoother(mesh.node, adj_link, lamda, mask, inplace=True)
     mesh.clear_geometry_derived_data(clear_adjacency_data=False)
-#%% old name
-SimpleSmootherForQuadMesh=simple_smoother_for_quad_mesh
 #%%
 #dtype is a necessary parameter of a function that is based on vtk functions
 # function(mesh, mesh_vtk, dtype) where mesh_vtk is the output of some vtk function and mesh does not exist
@@ -391,8 +373,6 @@ def cut_mesh_by_curve(mesh, curve, point_ref, straight_cut=False, return_unselec
     else:
         unselected_output_mesh=convert_polygon_mesh_to_triangle_mesh(None, unselected_output_vtk, dtype)
     return output_mesh, unselected_output_mesh
-#%% old name
-CutMeshByCurve=cut_mesh_by_curve
 #%%
 def project_point_to_mesh(point, mesh, mesh_vtk=None, dtype=None, cell_locator_vtk=None):
     #---------------
@@ -449,8 +429,6 @@ def project_point_to_mesh(point, mesh, mesh_vtk=None, dtype=None, cell_locator_v
         element_proj.append(int(cellId))
     point_proj=torch.tensor(point_proj, dtype=dtype, device=device).reshape(-1,3)#(0,3) if there is no point
     return point_proj, element_proj
-#%% old name
-ProjectPointToMesh=project_point_to_mesh
 #%%
 def smooth_and_project(mesh_move, mesh_fixed, lamda, mask, n1_iter, n2_iter, mesh_fixed_vtk=None, smooth_first=True):
     #smooth mesh_move and project it to mesh_fixed
@@ -477,8 +455,6 @@ def smooth_and_project(mesh_move, mesh_fixed, lamda, mask, n1_iter, n2_iter, mes
         mesh_move.clear_geometry_derived_data(clear_adjacency_data=False)
         if smooth_first == False and k < n2_iter-1:
             simple_smoother_for_mesh(mesh_move, lamda, mask, n1_iter)
-#%% old name
-SmoothAndProject=smooth_and_project            
 #%%
 def cal_point_to_mesh_distance(point, mesh, mesh_vtk=None, dtype=None):
     #this function is not differentiable
@@ -488,8 +464,6 @@ def cal_point_to_mesh_distance(point, mesh, mesh_vtk=None, dtype=None):
     point=point.to(device=point_proj.device)
     dist=((point-point_proj)**2).sum(dim=1).sqrt()
     return dist
-#%% old name
-PointToMeshDistance=cal_point_to_mesh_distance
 #%%
 def cal_mesh_to_mesh_distance(meshA, meshB, reduction):
     #this function is not differentiable
@@ -504,8 +478,6 @@ def cal_mesh_to_mesh_distance(meshA, meshB, reduction):
         return 0.5*(distA.mean()+distB.mean())
     else:
         raise ValueError
-#%% old name
-MeshToMeshDistance=cal_mesh_to_mesh_distance        
 #%%
 def convert_polygon_mesh_to_triangle_mesh(mesh, mesh_vtk=None, dtype=None):
     if mesh_vtk is None:
@@ -524,8 +496,6 @@ def convert_polygon_mesh_to_triangle_mesh(mesh, mesh_vtk=None, dtype=None):
     if output_vtk.GetNumberOfCells() > 0:
         output_mesh.read_mesh_vtk(output_vtk, dtype)
     return output_mesh
-#%%
-ConvertPolygonMeshToTriangleMesh=convert_polygon_mesh_to_triangle_mesh
 #%%
 def remove_unused_node_of_clip_output(mesh):
     #with two outputs, vtkClipPolyData gives both of them all points, used or not
@@ -591,8 +561,6 @@ def clip_mesh_by_plane(mesh, origin, normal, return_clipped_output=False, clean_
         remove_unused_node_of_clip_output(output_mesh)
         remove_unused_node_of_clip_output(clipped_output_mesh)
     return output_mesh, clipped_output_mesh
-#%% old name
-ClipMeshByPlane=clip_mesh_by_plane
 #%%
 def clip_mesh_by_node_attribute(mesh, attribute_threshold, attribute_name=None, invert=True,
                                    return_clipped_output=False, clean_output=False, eps=1e-5,
@@ -663,8 +631,6 @@ def clip_mesh_by_node_attribute(mesh, attribute_threshold, attribute_name=None, 
         remove_unused_node_of_clip_output(clipped_output_mesh)
     return output_mesh, clipped_output_mesh
 #%%
-ClipMeshByNodeAttribute=clip_mesh_by_node_attribute
-#%%
 def slice_mesh_by_plane(mesh, origin, normal, clean_output=False, eps=1e-5, mesh_vtk=None, dtype=None):
     #similar to slice function in paraview
     #An output with no cells is an empty PolylineMesh.
@@ -701,8 +667,6 @@ def slice_mesh_by_plane(mesh, origin, normal, clean_output=False, eps=1e-5, mesh
     if output_vtk.GetNumberOfCells() > 0:
         output_mesh.read_mesh_vtk(output_vtk, dtype=dtype)
     return output_mesh
-#%%
-SliceMeshByPlane=slice_mesh_by_plane
 #%%
 def cal_curvature(mesh, curvature_name='mean', mesh_vtk=None, dtype=None):
     if mesh_vtk is None:
@@ -747,8 +711,6 @@ def cal_curvature(mesh, curvature_name='mean', mesh_vtk=None, dtype=None):
     for i in range(0, curvature.shape[0]):
         curvature[i]=data.GetComponent(i,0)
     return curvature
-#%% old name
-ComputeCurvature=cal_curvature
 #%%
 def fill_hole(mesh, hole_size, clean_output=False, eps=1e-5, triangulate_output=False, mesh_vtk=None, dtype=None):
     #make a watertight mesh
@@ -787,8 +749,6 @@ def fill_hole(mesh, hole_size, clean_output=False, eps=1e-5, triangulate_output=
     else:
         output_mesh=convert_polygon_mesh_to_triangle_mesh(None, output_vtk, dtype)
     return output_mesh
-#%% old name
-FillHole=fill_hole
 #%%
 def find_dijkstra_graph_geodesic_path(mesh, start_node_idx, end_node_idx, mesh_vtk=None, dtype=None):
     """Return input vertex IDs in VTK's path order (end to start).
@@ -810,8 +770,6 @@ def find_dijkstra_graph_geodesic_path(mesh, start_node_idx, end_node_idx, mesh_v
         return []
     path_ids=finder.GetIdList()
     return [path_ids.GetId(n) for n in range(path_ids.GetNumberOfIds())]
-#%% old name
-FindDijkstraGraphGeodesicPath=find_dijkstra_graph_geodesic_path
 #%%
 def subdivide(mesh, n_subdivision, method='linear', mesh_vtk=None, dtype=None):
     #method: 
@@ -848,5 +806,4 @@ def subdivide(mesh, n_subdivision, method='linear', mesh_vtk=None, dtype=None):
     if filter.GetOutput().GetNumberOfCells() > 0:
         output_mesh.read_mesh_vtk(filter.GetOutput(), dtype)
     return output_mesh
-#%% old name
-Subdivision=subdivide
+#%%

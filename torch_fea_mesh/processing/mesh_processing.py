@@ -9,7 +9,7 @@ import torch_scatter
 import numpy as np
 from ..mesh.mesh import Mesh, find_vtk_cell_by_element_type, get_dimension_of_mesh_type
 from copy import deepcopy
-from ..utility.geometry_utility import cal_angle_between_3d_vector, ComputeAngleBetweenTwoVectorIn3D
+from ..utility.geometry_utility import cal_angle_between_3d_vector
 #%%
 def find_connected_region(mesh, ref_element_idx, adj):
     if not isinstance(mesh, Mesh):
@@ -35,20 +35,16 @@ def find_connected_region(mesh, ref_element_idx, adj):
     #indexes of elements
     return region_element_list
 #%%
-FindConnectedRegion=find_connected_region
-#%%
 def segment_mesh_to_connected_region(mesh, adj):
     element_list=np.arange(0, len(mesh.element)).tolist()
     region_list=[]
     while True:
         if len(element_list) == 0:
             break
-        region=FindConnectedRegion(mesh, element_list[0], adj)
+        region=find_connected_region(mesh, element_list[0], adj)
         region_list.append(region)
         element_list=list(set(element_list)-set(region))
     return region_list
-#%%
-SegmentMeshToConnectedRegion=segment_mesh_to_connected_region
 #%%
 def convert_smoother_mask(mask, field):
     #return 1, or a tensor of shape (N,1) with the dtype and device of field
@@ -87,8 +83,6 @@ def simple_smoother(field, adj_link, lamda, mask, inplace):
         field=field+delta
     return field
 #%%
-SimpleSmoother=simple_smoother
-#%%
 def simple_smoother_for_mesh(mesh, lamda, mask, n_iter):
     #lamda: x_i = x_i + lamda*mean_j(x_j - x_i),  0<=lamda<=1
     #mesh.node is modified
@@ -100,10 +94,8 @@ def simple_smoother_for_mesh(mesh, lamda, mask, n_iter):
         mesh.build_node_to_node_adj_link()
     adj_link=mesh.node_to_node_adj_link.to(mesh.node.device)
     for n in range(0, n_iter):
-        SimpleSmoother(mesh.node, adj_link, lamda, mask, inplace=True)
+        simple_smoother(mesh.node, adj_link, lamda, mask, inplace=True)
     mesh.clear_geometry_derived_data(clear_adjacency_data=False)
-#%%
-SimpleSmootherForMesh=simple_smoother_for_mesh        
 #%%
 def is_edge_curve_closed(mesh, edge_curve):
     #edge_curve is a list/array/set of indexes into mesh.edge; order is irrelevant.
@@ -142,8 +134,6 @@ def is_edge_curve_closed(mesh, edge_curve):
         size[root_n]+=size[root_n1]
     return False
 #%%
-IsEdgeCurveClosed=is_edge_curve_closed
-#%%
 def is_node_curve_closed(mesh, node_curve):
     #node_curve is an ordered list/array of node indexes on mesh.
     #Return a bool: True if its consecutive mesh edges include a closed loop.
@@ -156,8 +146,6 @@ def is_node_curve_closed(mesh, node_curve):
         if edge_idx is not None:
             edge_curve.add(edge_idx)
     return is_edge_curve_closed(mesh, edge_curve)
-#%%
-IsNodeCurveClosed=is_node_curve_closed
 #%%
 def trace_polyline(mesh, start_node_idx, next_node_idx, end_node_idx=None, angle_threshold=np.pi/2, eps=None):
     #find a smoothed polyline on mesh: start_node_idx -> next_node_idx -> ... -> end_node_idx
@@ -202,11 +190,9 @@ def trace_polyline(mesh, start_node_idx, next_node_idx, end_node_idx=None, angle
         else:
             polyline.append(idx_list_next[k_min])
     if (end_node_idx is not None) and (polyline[-1] != end_node_idx):
-        print("warning: polyline[-1] != end_node_idx @ TracePolyline")
+        print("warning: polyline[-1] != end_node_idx @ trace_polyline")
     #done
     return polyline
-#%%
-TracePolyline=trace_polyline
 #%%
 def merge_element_type(meshA, meshB):
     #element_type of a merged mesh: meshA's elements, then meshB's.
@@ -264,7 +250,7 @@ def merge_mesh(meshA, node_idx_listA, meshB, node_idx_listB, distance_threshold)
     #the output is on the device of meshA.node, and meshB can be on another device
     if (not isinstance(meshA, Mesh)) or (not isinstance(meshB, Mesh)):
         #raise NotImplementedError
-        print("warning: input may not be Mesh @ MergeMesh")
+        print("warning: input may not be Mesh @ merge_mesh")
     if meshA.node.shape[0] == 0 or meshB.node.shape[0] == 0:
         raise ValueError("meshA or meshB is empty")
     if get_dimension_of_mesh_type(meshA.mesh_type) != get_dimension_of_mesh_type(meshB.mesh_type):
@@ -316,8 +302,6 @@ def merge_mesh(meshA, node_idx_listA, meshB, node_idx_listB, distance_threshold)
             elm[k]=int(node_idx_map_B_to_Out[elm[k]])
 
     return make_merged_mesh(meshA, meshB, nodeAB, elementAB)
-#%%
-MergeMesh=merge_mesh
 #%%
 def remove_unused_node(mesh, return_node_idx_list=False, clear_adj_info=True):
     #if a node does not belong to an element, then it is unused
@@ -395,8 +379,6 @@ def remove_unused_node(mesh, return_node_idx_list=False, clear_adj_info=True):
     if return_node_idx_list == True:
         return node_idx_list
 #%%
-RemoveUnusedNode=remove_unused_node    
-#%%
 def find_nearest_node(mesh, point, distance_threshold=np.inf):
     #point (K, 3) or (3,)
     #return one result per point: a node index, or None if no node is within distance_threshold
@@ -419,8 +401,6 @@ def find_nearest_node(mesh, point, distance_threshold=np.inf):
         return node_idx_list
     else:
         return node_idx_list[0]
-#%%
-FindNearestNode=find_nearest_node
 #%%
 def find_neighbor_node(mesh, node_idx, max_n_hop):
     if isinstance(node_idx, int):
@@ -454,4 +434,3 @@ def find_neighbor_node(mesh, node_idx, max_n_hop):
         n_hop+=1
     return neighbor_node_list
 #%%
-FindNeighborNode=find_neighbor_node

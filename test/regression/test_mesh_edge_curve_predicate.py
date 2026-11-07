@@ -8,7 +8,7 @@ import unittest
 import numpy as np
 import torch
 
-from torch_fea_mesh.processing.mesh_processing import is_edge_curve_closed, IsEdgeCurveClosed, is_node_curve_closed
+from torch_fea_mesh.processing.mesh_processing import is_edge_curve_closed, is_node_curve_closed
 from torch_fea_mesh.mesh.polyline_mesh import PolylineMesh
 from torch_fea_mesh.mesh.triangle_mesh import TriangleMesh
 
@@ -55,7 +55,7 @@ class EdgeCurvePredicateTest(unittest.TestCase):
                 with self.subTest(dtype=dtype, input_type=make_input.__name__):
                     edges = make_input(loop[::-1])
                     before = list(edges)
-                    self.assertIs(IsEdgeCurveClosed(mesh=mesh, edge_curve=edges), True)
+                    self.assertIs(is_edge_curve_closed(mesh=mesh, edge_curve=edges), True)
                     self.assertEqual([int(i) for i in edges], [int(i) for i in before])
             torch.testing.assert_close(mesh.node, nodes)
             torch.testing.assert_close(mesh.element, elements)
