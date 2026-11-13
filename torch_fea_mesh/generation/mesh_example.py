@@ -1,10 +1,10 @@
 import torch
 import numpy as np
-from ..mesh.polygon_mesh import PolygonMesh
-from ..mesh.quad_mesh import QuadMesh
-from ..processing.polygon_mesh_processing import merge_mesh_on_boundary
-from ..processing.mesh_processing import simple_smoother_for_mesh
-from ..mesh.hexahedron_mesh import HexahedronMesh as Hex8Mesh
+from torch_fea_mesh.mesh.polygon_mesh import PolygonMesh
+from torch_fea_mesh.mesh.quad_mesh import QuadMesh
+from torch_fea_mesh.processing.polygon_mesh_processing import merge_mesh_on_boundary
+from torch_fea_mesh.processing.mesh_processing import simple_smoother_for_mesh
+from torch_fea_mesh.mesh.hexahedron_mesh import HexahedronMesh as Hex8Mesh
 #%%
 def create_quad_cylinder_mesh(n_circle, n_point_per_circle, radius=1, height=1, dtype=torch.float32):
     theta=2*np.pi/n_point_per_circle

@@ -2,9 +2,9 @@ import torch
 from torch.linalg import vector_norm as norm
 import torch_scatter
 import numpy as np
-from .triangle_mesh import TriangleMesh
-from .polygon_mesh import PolygonMesh
-from ..utility.geometry_utility import cal_angle_between_3d_vector
+from torch_fea_mesh.mesh.triangle_mesh import TriangleMesh
+from torch_fea_mesh.mesh.polygon_mesh import PolygonMesh
+from torch_fea_mesh.utility.geometry_utility import cal_angle_between_3d_vector
 #%%
 class Tri6Mesh(PolygonMesh):
     #6-node triangle element mesh

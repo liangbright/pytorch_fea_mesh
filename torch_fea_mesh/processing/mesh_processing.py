@@ -7,9 +7,9 @@ Created on Fri Nov  3 00:12:58 2023
 import torch
 import torch_scatter
 import numpy as np
-from ..mesh.mesh import Mesh, find_vtk_cell_by_element_type, get_dimension_of_mesh_type
+from torch_fea_mesh.mesh.mesh import Mesh, find_vtk_cell_by_element_type, get_dimension_of_mesh_type
 from copy import deepcopy
-from ..utility.geometry_utility import cal_angle_between_3d_vector
+from torch_fea_mesh.utility.geometry_utility import cal_angle_between_3d_vector
 #%%
 def find_connected_region(mesh, ref_element_idx, adj):
     if not isinstance(mesh, Mesh):

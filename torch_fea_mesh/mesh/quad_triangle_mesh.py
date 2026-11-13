@@ -3,9 +3,9 @@ import torch
 from torch.linalg import vector_norm as norm
 from torch.linalg import cross
 import torch_scatter
-from .polygon_mesh import PolygonMesh
-from .quad_mesh import QuadMesh
-from .triangle_mesh import TriangleMesh
+from torch_fea_mesh.mesh.polygon_mesh import PolygonMesh
+from torch_fea_mesh.mesh.quad_mesh import QuadMesh
+from torch_fea_mesh.mesh.triangle_mesh import TriangleMesh
 #%%
 class QuadTriangleMesh(PolygonMesh):
     #element could be quad or triangle

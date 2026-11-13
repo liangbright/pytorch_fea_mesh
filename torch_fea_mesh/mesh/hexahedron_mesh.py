@@ -10,7 +10,7 @@ import torch
 import numpy as np
 #import json
 from torch.linalg import cross
-from .polyhedron_mesh import PolyhedronMesh
+from torch_fea_mesh.mesh.polyhedron_mesh import PolyhedronMesh
 #%%
 class HexahedronMesh(PolyhedronMesh):
     #8-node C3D8 mesh

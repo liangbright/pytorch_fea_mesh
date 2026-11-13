@@ -2,7 +2,7 @@ import torch
 import torch_scatter
 import numpy as np
 from torch.linalg import det, cross
-from .polyhedron_mesh import PolyhedronMesh
+from torch_fea_mesh.mesh.polyhedron_mesh import PolyhedronMesh
 #%%
 class TetrahedronMesh(PolyhedronMesh):
     #4-node C3D4/TET4 mesh

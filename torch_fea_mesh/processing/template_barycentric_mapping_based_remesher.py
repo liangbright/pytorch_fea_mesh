@@ -23,7 +23,7 @@ from scipy.special import logsumexp
 from scipy.optimize import linprog
 import torch
 
-from ..mesh.polygon_mesh import PolygonMesh
+from torch_fea_mesh.mesh.polygon_mesh import PolygonMesh
 
 # Public interface
 

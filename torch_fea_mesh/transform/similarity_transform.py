@@ -7,7 +7,7 @@ Created on Wed Jan 31 19:48:28 2024
 import torch
 import torch.nn as nn
 from torch.linalg import matmul
-from .rotation_transform import RotationTransform3D
+from torch_fea_mesh.transform.rotation_transform import RotationTransform3D
 #%% y=s*R*(x-t)
 class SimilarityTransform3D(nn.Module):
     def __init__(self, dtype=None):

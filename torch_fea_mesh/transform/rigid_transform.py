@@ -7,7 +7,7 @@ Created on Thu Feb  1 18:24:02 2024
 import torch
 import torch.nn as nn
 from torch.linalg import matmul
-from .rotation_transform import RotationTransform3D
+from torch_fea_mesh.transform.rotation_transform import RotationTransform3D
 #%% y=R*(x-t)
 class RigidTransform3D(nn.Module):
     def __init__(self, dtype=None):

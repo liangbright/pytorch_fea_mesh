@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 from copy import deepcopy
-from .mesh import Mesh
+from torch_fea_mesh.mesh.mesh import Mesh
 import json
 #%%
 class PolygonMesh(Mesh):

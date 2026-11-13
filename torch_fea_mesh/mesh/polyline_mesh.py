@@ -6,7 +6,7 @@ Created on Fri Jun 14 17:40:25 2024
 """
 import torch
 import numpy as np
-from .mesh import Mesh
+from torch_fea_mesh.mesh.mesh import Mesh
 #%%
 class PolylineMesh(Mesh):
     def __init__(self, node=None, element=None):

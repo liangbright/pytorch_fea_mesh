@@ -1,14 +1,14 @@
 import torch
 import torch_scatter
 import numpy as np
-from ..mesh.polyhedron_mesh import PolyhedronMesh
-from ..mesh.tetrahedron_mesh import TetrahedronMesh
-from ..mesh.hexahedron_mesh import HexahedronMesh
-from ..mesh.tet10_mesh import Tet10Mesh
-from ..mesh.polygon_mesh import PolygonMesh
-from ..mesh.quad_mesh import QuadMesh
-from ..mesh.triangle_mesh import TriangleMesh
-from ..mesh.tri6_mesh import Tri6Mesh
+from torch_fea_mesh.mesh.polyhedron_mesh import PolyhedronMesh
+from torch_fea_mesh.mesh.tetrahedron_mesh import TetrahedronMesh
+from torch_fea_mesh.mesh.hexahedron_mesh import HexahedronMesh
+from torch_fea_mesh.mesh.tet10_mesh import Tet10Mesh
+from torch_fea_mesh.mesh.polygon_mesh import PolygonMesh
+from torch_fea_mesh.mesh.quad_mesh import QuadMesh
+from torch_fea_mesh.mesh.triangle_mesh import TriangleMesh
+from torch_fea_mesh.mesh.tri6_mesh import Tri6Mesh
 #%%
 def ExtractSurfaceElement_slow(mesh):
     #extract surface and make sure surface normal is from inside to outside

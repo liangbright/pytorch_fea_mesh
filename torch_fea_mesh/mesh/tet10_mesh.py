@@ -2,8 +2,8 @@ import torch
 #import torch_scatter
 import numpy as np
 from torch.linalg import det, cross
-from .tetrahedron_mesh import TetrahedronMesh
-from .polyhedron_mesh import PolyhedronMesh
+from torch_fea_mesh.mesh.tetrahedron_mesh import TetrahedronMesh
+from torch_fea_mesh.mesh.polyhedron_mesh import PolyhedronMesh
 #%%
 class Tet10Mesh(PolyhedronMesh):
     #10-node C3D10/TET10 mesh

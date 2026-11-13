@@ -3,8 +3,8 @@ from torch.linalg import vector_norm as norm
 from torch.linalg import cross
 import torch_scatter
 import numpy as np
-from .polygon_mesh import PolygonMesh
-from ..utility.geometry_utility import cal_angle_between_3d_vector
+from torch_fea_mesh.mesh.polygon_mesh import PolygonMesh
+from torch_fea_mesh.utility.geometry_utility import cal_angle_between_3d_vector
 #%%
 class QuadMesh(PolygonMesh):
     #4-node quad element mesh

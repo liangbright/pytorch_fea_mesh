@@ -6,7 +6,7 @@ Created on Sun Oct  9 16:32:29 2022
 """
 from collections import deque
 import torch
-from ..mesh.polygon_mesh import PolygonMesh
+from torch_fea_mesh.mesh.polygon_mesh import PolygonMesh
 #%%
 def _clear_geometry_cache(mesh):
     for name in ('node_normal', 'element_normal', 'element_area',

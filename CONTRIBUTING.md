@@ -2,7 +2,8 @@
 
 Install the package in editable mode with the `dev` extra and the appropriate
 compiled dependencies; see [installation](doc/installation.md). Use snake_case
-module names and relative internal imports. Add regression coverage for behavior
+module names and absolute internal imports (`from torch_fea_mesh.mesh.mesh import Mesh`,
+not `from .mesh import Mesh`). Add regression coverage for behavior
 changes and document new public APIs.
 
 ## Naming conventions

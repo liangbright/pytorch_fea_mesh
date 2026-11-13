@@ -33,8 +33,8 @@ import time
 import numpy as np
 import torch
 import vtk
-from ..mesh.triangle_mesh import TriangleMesh
-from ..mesh.mesh import Mesh
+from torch_fea_mesh.mesh.triangle_mesh import TriangleMesh
+from torch_fea_mesh.mesh.mesh import Mesh
 
 # Public API
 

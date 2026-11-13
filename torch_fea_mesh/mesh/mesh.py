@@ -4,9 +4,9 @@ import torch
 from torch.linalg import vector_norm as norm
 import numpy as np
 from copy import deepcopy, copy as shallowcopy
-from ..io.save_mesh_as_vtk_file import (save_polyline_mesh_as_vtk, save_polygon_mesh_as_vtk, save_quadratic_polygon_mesh_as_vtk,
+from torch_fea_mesh.io.save_mesh_as_vtk_file import (save_polyline_mesh_as_vtk, save_polygon_mesh_as_vtk, save_quadratic_polygon_mesh_as_vtk,
                                         save_polyhedron_mesh_as_vtk, to_numpy)
-from ..io.check_legacy_vtk_file import find_cut_in_legacy_vtk_file
+from torch_fea_mesh.io.check_legacy_vtk_file import find_cut_in_legacy_vtk_file
 import os
 import re
 _Flag_VTK_IMPORT_=False

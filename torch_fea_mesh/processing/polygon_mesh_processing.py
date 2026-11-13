@@ -2,16 +2,16 @@ import torch
 from torch.linalg import vector_norm as norm
 import torch_scatter
 import numpy as np
-from ..mesh.polyline_mesh import PolylineMesh
-from ..mesh.polygon_mesh import PolygonMesh
-from ..mesh.triangle_mesh import TriangleMesh
-from ..mesh.tri6_mesh import Tri6Mesh
-from ..mesh.quad_mesh import QuadMesh
-from ..mesh.quad_triangle_mesh import QuadTriangleMesh
+from torch_fea_mesh.mesh.polyline_mesh import PolylineMesh
+from torch_fea_mesh.mesh.polygon_mesh import PolygonMesh
+from torch_fea_mesh.mesh.triangle_mesh import TriangleMesh
+from torch_fea_mesh.mesh.tri6_mesh import Tri6Mesh
+from torch_fea_mesh.mesh.quad_mesh import QuadMesh
+from torch_fea_mesh.mesh.quad_triangle_mesh import QuadTriangleMesh
 from copy import deepcopy
-from .mesh_processing import convert_smoother_mask, remove_unused_node
-from .mesh_processing import simple_smoother, simple_smoother_for_mesh, trace_polyline, is_edge_curve_closed, is_node_curve_closed, merge_mesh, find_connected_region, find_nearest_node, segment_mesh_to_connected_region, find_neighbor_node
-from ..utility.geometry_utility import cal_angle_between_3d_vector
+from torch_fea_mesh.processing.mesh_processing import convert_smoother_mask, remove_unused_node
+from torch_fea_mesh.processing.mesh_processing import simple_smoother, simple_smoother_for_mesh, trace_polyline, is_edge_curve_closed, is_node_curve_closed, merge_mesh, find_connected_region, find_nearest_node, segment_mesh_to_connected_region, find_neighbor_node
+from torch_fea_mesh.utility.geometry_utility import cal_angle_between_3d_vector
 try:
     import vtk
 except Exception as e:
